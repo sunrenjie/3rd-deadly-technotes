@@ -1,0 +1,26 @@
+
+Our reading of the linux source code will be based on linux-2.6.32.27
+
+Definition of the IP header @ include/linux/ip.h:
+ 85 struct iphdr {
+ 86 #if defined(__LITTLE_ENDIAN_BITFIELD)
+ 87   __u8  ihl:4,
+ 88     version:4;
+ 89 #elif defined (__BIG_ENDIAN_BITFIELD)
+ 90   __u8  version:4,
+ 91       ihl:4;
+ 92 #else
+ 93 #error  "Please fix <asm/byteorder.h>"
+ 94 #endif
+ 95   __u8  tos;
+ 96   __be16  tot_len;
+ 97   __be16  id;
+ 98   __be16  frag_off;
+ 99   __u8  ttl;
+100   __u8  protocol;
+101   __sum16 check;
+102   __be32  saddr;
+103   __be32  daddr;
+104   /*The options start here. */
+105 };
+

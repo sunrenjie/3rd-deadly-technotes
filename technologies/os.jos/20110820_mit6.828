@@ -1,0 +1,79 @@
+
+Meta-info about MIT 6.828 "Operating System Engineering"
+
+Apr 20, 2011
+
+This file logs the effort to JOS related stuff, while trying to learn MIT 6.828,
+a whole solid year later.
+We've decided to run on the SUSE Linux x86_64 11.2 with gcc4.4 x86_64/32-bit
+installed.
+
+We've downloaded and installed the latest (2.4.6) bochs x86_64 rpm successfully.
+We've got to cross compile JOS as 32-bit binary on this x86_64 system:
+make -e CC='gcc -m32' -e LD='ld -m elf_i386'
+
+Aug 18, 2011 by Renjie Sun
+
+We try to address many meta-info about this course here. It is a pity we did not
+keep track of the origin of the files and now they all come to a mass. We will
+re-verify the originals and keep track.
+
+bochs (2.4.6) compiling options
+./configure --prefix=/opt/bochs-2.4.6-debugging --enable-debugger=yes
+
+--enable-debugger is 'no' by default, as it will 'slow down the emulation'.
+--enable=cdrom and --enable-disasm is 'yes' by default, fortunately.
+It is a good idea to compile both a debugging and non-debugging version to serve
+different needs:
+
+$ ls -l /opt/bochs-2.4.6/bin
+total 8668
+-rwxr-xr-x 1 renjie renjie 8789654 Aug 18 11:20 bochs
+lrwxrwxrwx 1 renjie renjie      37 Aug 18 11:34 bochs-debug -> ../../bochs-2.4.6-debugging/bin/bochs
+-rwxr-xr-x 1 renjie renjie   24992 Aug 18 11:20 bxcommit
+-rwxr-xr-x 1 renjie renjie   38412 Aug 18 11:20 bximage
+
+We will keep dedicated log for special topics.
+
+Dec 14, 2014
+
+We've decided to restart everything (again!) so that everything is crystal
+clear in git repo.
+
+This time we use the 2014 version of course material. That means that the
+code is from git repo, and that we will use qemu as the emulator and pdb as
+the debugger. Fedora Linux 20 x86_64 and Mac OS X 10.8 are chosen as the
+supported and documented host environments, though many other modern UNIX-like
+OS'es may work as well.
+
+Host environment preparation:
+[UPDATE 20141220: added bochs as an alternative; bochs-specific info is at
+ os.gnu-linux/bochs ]
++ Fedora Linux 20 x86_64 (and potentially many other modern GNU/Linux distros)
+  + Just install gcc, libgcc, gdb, qemu, bochs the standard way. In addition,
+    libgcc.i686 is needed as this is 64-bit host. Everything works out of box
+    (though debugging experience with gdb is imperfect; see below).
++ Mac OS X 10.8
+  + Installation:
+    + gcc: install i386-elf-gcc from Macports.
+    + gdb: download the source tarball and compile as instructed in
+      http://pdos.csail.mit.edu/6.828/2009/tools.html ; specifically, the
+      configure command line shall be:
+      ./configure --target=i386-elf --program-prefix=i386-elf- --disable-werror
+    + qemu: install qemu from Macports.
+  + Execution: always set GCCPREFIX to 'i386-elf-'; e.g., make commands may be
+    executed as env GCCPREFIX=i386-elf- make ...
+
+[20141220]
+We are actually disappointed by the debugging experience of qemu+gdb:
+1. We cannot set breakpoints in terms of virtual addresses (and hence function
+   names and numbers).
+2. Hitting virtual address breakpoints in kernel also breaks the debugging:
+   continue no more working. Gdb exits, qemu and guest OS continue running,
+   though.
+The above observation is applicable to all combinations of qemu+gdb. While we
+are unable to figure out the root cause, we have to conclude that this method
+is not applicable temporarily, and that we'd better explore an alternative,
+the good old bochs.
+Additional observations: bochs+gdb still have similar problems. Seems gdb is
+confused about virtual/physical addresses. There must be workarounds.

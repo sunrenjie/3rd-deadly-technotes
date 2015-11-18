@@ -1,0 +1,29 @@
+Q: What to do when the commit you wish to study is totally alien to you?
+A: At least you could do the following:
+   0) Don't panic; for any of the possibly awesome steps, repeat until you
+      are thru.
+   1) Work on pieces one by one; keep going slowly yet steadily; now and then
+      try to get abstract idea from the change.
+   2) Figure out the data structure / database table in question (there is
+      likely to be a one since this change is a quite complex one); find all
+      its usage.
+   3) Read relevant bug report and / or commit message thoroughly, till you
+      digests them.
+   4) If the diff is bewilding, understand present code or previous code
+      first. That helps.
+
+Questions for you in case you do not have a clue:
++ What is this change is about? (hint: describe the blueprint or bug if
+  applicable)
++ How does the change essentially evolves all the way, from the first change to
+  the latest one?
++ How is this change implemented? (hint: code quality: cleanness,
+  extensibility)
++ What is the impact this change implies?
++ Is there any possible improvement?
++ How do you understand interesting phrase or wording of the commit message?
++ What's more that can be said?
+Considerations in raising questions and hence answering them:
++ The necessity of the change shall be addressed partially by description of
+  the blueprint/bug (what about) and partially by how is the change
+  implemented.

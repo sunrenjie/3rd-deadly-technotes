@@ -1,0 +1,203 @@
+
+Mar 3, 2012
+
+To make the JOS boot loader to load the symbol table from the kernel's ELF
+binary, so that our stack backtrace function can display the name of each
+function called in the backtrace.
+
+There are some questions we should take into account:
+Q1. Where shall we place data for these sections: section header string table,
+    symbol table, string table, without conflicting with the kernel memory?
+    The kernel segments are one thing, there are other memory areas that the
+    kernel might wish to make use.
+A1. Temporarily, we think the 'conventional memory' is suitable for our purpose.
+    The kernel is loaded at 0x100000(1MB bytes) and above. Except for very
+    special occasions (e.g., accessing CGA buffer at 0xb8000), the kernel rarely
+    access such lower areas. Now that we wish to load the symbol table in JOS
+    boot loader, we have no knowledge for memory above 1M. We've decided that
+    the area [0x50000, 0xa0000) is the most likely candidate.
+
+What we shall do and have:
+[Necessary while in boot loader]:
+0. load the section header table
+1. load the section name string table.
+2. traverse section header table to identify index of the relevant sections:
+   '.text', '.symtab', '.strtab'.
+3. load the sections: symbol table, string table (memory for symbol table can be
+   re-claimed later theoretically)
+4. mark out functions in the symbol table for kernel (e.g., using the last word
+   in each entry). If we don't do this here, we'll have to ex	pose section name
+   string table to the kernel to do this.
+All in all, we will want a memory manager to allocate memory.
+If we don't identify the symbol table and string table here, we'll have to load
+ALL sections here.
+
+[While in kernel]:
++. Get to know the following information the boot loader left to us:
+   I. the symbol table
+   II. the string table
++. filter symbol table to get only relevant symbols(now only functions)
++. sort the symbol table in terms of virtual address
++. provide a query function that searches the symbol table.
+
+--------------------------------------------------------------------------------
+        // read 1st page off disk
+        readseg((uint32_t) ELFHDR, SECTSIZE*8, 0);
+
+        // is this a valid ELF?
+        if (ELFHDR->e_magic != ELF_MAGIC)
+                goto bad;
+
+        // load each program segment (ignores ph flags)
+        ph = (struct Proghdr *) ((uint8_t *) ELFHDR + ELFHDR->e_phoff);
+        eph = ph + ELFHDR->e_phnum;
+        for (; ph < eph; ph++)
+                readseg(ph->p_va, ph->p_memsz, ph->p_offset);
+
+The above code works if and only if the program header table fits in the 1st
+page, which is indeed the case for our over-simple kernel. But our section
+header table can not. Temporarily we'll just ignore the program header case and
+just do our own job.
+--------------------------------------------------------------------------------
+notes:
+readseg() is potentially dangerous in that it might read more than required.
+So it's better we use it only to initialize data structures sequencetially from
+lower to higher memory area.
+
+The JOS boot loader must fit into a 510-byte block.
+Though we might be tempted to do the filter and sort at boot loader, it's unwise
+to do so, as our resources are extremely limited. It's better we simpy load the
+'raw' section data in boot loader, and let the kernel to process it.
+It's critical we decide wisely which tasks are whose.
+
+The condition is unfortunate for us. The original code is already 411 in bytes.
+The left 100 bytes is extremely limited for the what we wish to do.
+Either we do less, or we find at least another sector for our code. Let kernel
+image start at >2 sector is trivial.
+
+Mar 4, 2011
+
+We've decided to make a 'boot2' loader that will do just everything related to
+the symbol table, making changes to the original boot loader as few as possible.
+We'll reserve 10 blocks for boot loader code, leaving 9 for 'boot2'.
+This 'boot2' will be loaded immediately after the original loader, namely,
+[0x7e00, 0x9000]. We'll have some well-defined pointers here for the kernel
+to use.
+
+What we'll do:
++ changes to boot
+  + main.c
+    + load kernel from sector 10
+    + load boot2
+    + transfer control to boot2
+  + add boot2.S
+    + transfer control to main2.c
+  + add main2.c
+    + prepare all symbol table related data structure well
+    + transfer control to the kernel
+  + Makefrag
+    + add make code for boot2
++ changes to kern
+  + Makefrag
+    + insert boot2 to hd image
+    + move kernel to sector 10 at hd image
+
+Our sorting algorithm here will have one choice to make here:
+1) sort directly on the symbol table
+   For each and every 'swap' we will have to copy the whole element
+2) extract only the element index and the address against which we sort, sort on
+   element index, generate a permutation and do one round of copying.
+Temporarily, our sort algorithm will be based on the former method. Though this
+is seemingly inefficient, but it is simpler.
+
+We've encountered a strange bug, which I suspected due to the fact that these
+following offset are not on sector boundary: section header table, various
+sections.
+The readseg() function is too simple to handle this. It takes the advantage
+that the kernel text and data sections are aligned at at least 0x1000 (4KB)
+boundaries in memory. See kern/kernel.ld for details. Though we still need
+explicit evidence for their alignment in kernel file.
+
+Also, efficiency is better not taken into account here, as we are in GREAT
+need for a working boot loader now. Improvements are allowed, but not at here.
+
+We'll adorpt the simplest approach for all stages:
++ load sections in boot loader:
+  + simply load the whole kernel image into the memory.
+    The kernel, for the time being, is 73K in size. The area [0x10000, 0x90000),
+    512KB in size, is still large enough for the kernel.
+  + do not sort the symbol table
+  + do not still mark out non-function symbols
++ search symbols at kernel:
+  + do a plain (and inefficient) search
+
+JOS uses -O1 and -Os for compilation, remove them all. Or else the debugging
+task will be a nightmare.
+
+Finally, we are done at 20120304 21:35!!! Please see the screenshot.
+We do realize how careful we must be when dealing with pointers. Note how
+we get the symbol table and string table at kern/monitor.c:
+ 65         symtable = (struct SymTable *)(*(uint8_t **)((uint32_t) SectSymTable + KERNBASE) + KERNBASE);
+ 66         strtable = (const char *)(*(const char **)((uint32_t)SectStrTable + KERNBASE) + KERNBASE);
+I shall read the tutorial about C pointer again and again.
+
+This marks the ending of the final challenge of lab1 and lab1 itself!!!
+Though we may wish to improve it when we have time:
+1. improve the symbol related code, which, while working, is inefficient.
+2. make JOS boot on cdrom on debian x86_64 bochs.
+
+Update [20130704]: There is a requirement in Lab 2, Exercise 4 to 'see if the
+bootloader loads the symbol table in memory as part of loading the kernel
+binary'. It seems that for it is suggested that the bootloader does so. But when
+we examine the bootloader code, we found only code that load the segments.
+This is only one possibility: the segments loaded do contain the sections
+containing section tables, symbol tables. This is verified by the following
+output:
+
+$ i386-elf-readelf -l kernel
+
+Elf file type is EXEC (Executable file)
+Entry point 0xf010000c
+There are 2 program headers, starting at offset 52
+
+Program Headers:
+  Type           Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align
+  LOAD           0x001000 0xf0100000 0xf0100000 0x0e0cd 0x0e0cd R E 0x1000
+  LOAD           0x010000 0xf010f000 0xf010f000 0x085d8 0x08c70 RW  0x1000
+
+ Section to Segment mapping:
+  Segment Sections...
+   00     .text .rodata .stab .stabstr 
+   01     .data .bss 
+doodles:kern renjiesun$ i386-elf-readelf -S kernel
+There are 18 section headers, starting at offset 0x1a290:
+
+Section Headers:
+  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
+  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
+  [ 1] .text             PROGBITS        f0100000 001000 004472 00  AX  0   0  4
+  [ 2] .rodata           PROGBITS        f0104474 005474 000d9b 00   A  0   0  4
+  [ 3] .stab             PROGBITS        f0105210 006210 0068a1 0c   A  4   0  4
+  [ 4] .stabstr          STRTAB          f010bab1 00cab1 00261c 00   A  0   0  1
+  [ 5] .data             PROGBITS        f010f000 010000 0085d8 00  WA  0   0 4096
+  [ 6] .bss              NOBITS          f01175e0 0185d8 000690 00  WA  0   0 32
+  [ 7] .comment          PROGBITS        00000000 0185d8 000011 01  MS  0   0  1
+  [ 8] .debug_info       PROGBITS        00000000 0185e9 0005e6 00      0   0  1
+  [ 9] .debug_abbrev     PROGBITS        00000000 018bcf 000274 00      0   0  1
+  [10] .debug_loc        PROGBITS        00000000 018e43 000ee1 00      0   0  1
+  [11] .debug_aranges    PROGBITS        00000000 019d24 000040 00      0   0  1
+  [12] .debug_ranges     PROGBITS        00000000 019d64 0000d8 00      0   0  1
+  [13] .debug_line       PROGBITS        00000000 019e3c 0001f3 00      0   0  1
+  [14] .debug_str        PROGBITS        00000000 01a02f 0001ba 01  MS  0   0  1
+  [15] .shstrtab         STRTAB          00000000 01a1e9 0000a5 00      0   0  1
+  [16] .symtab           SYMTAB          00000000 01a560 000af0 10     17  85  4
+  [17] .strtab           STRTAB          00000000 01b050 000614 00      0   0  1
+Key to Flags:
+  W (write), A (alloc), X (execute), M (merge), S (strings)
+  I (info), L (link order), G (group), T (TLS), E (exclude), x (unknown)
+  O (extra OS processing required) o (OS specific), p (processor specific)
+
+Indeed, the last challange of lab 1 is misleading in that we really do not need
+to do any addition work to load the symbol related data structures, because they
+are just there.
+

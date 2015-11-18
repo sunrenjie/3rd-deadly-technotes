@@ -1,0 +1,51 @@
+
+Trying to understand how 'pinch' gesture works and related data structures.
+Feb 24, 2011
+
+utouch-qml-1.0.4/src/gesturearea.h:
+ 65 class GestureArea : public QDeclarativeItem {
+...
+ 82   /**
+ 83    * This property holds the position of the centroid of the touches
+ 84    * comprising the gesture.
+ 85    *
+ 86    * For TouchScreen devices, the centroid is mapped to item coordinates. For
+ 87    * all other devices, the centroid is left in device coordinates.
+ 88    */
+ 89   Q_PROPERTY(GestureProperty* centroid READ centroid CONSTANT)
+ 90 
+ 91   /**
+ 92    * This property holds the focus point of the gesture.
+ 93    *
+ 94    * For TouchScreen devices, the focus point is the centroid of the touches
+ 95    * when the gesture begins. For other devices, the focus point is the
+ 96    * location of the pointer when the gesture begins.
+ 97    *
+ 98    * The focus point is always mapped to item coordinates.
+ 99    */
+100   Q_PROPERTY(QPointF focus READ focus NOTIFY focusChanged)
+
+utouch-qml-1.0.4/src/continuousgesturearea.h:
+ 12 class ContinuousGestureArea : public GestureArea {
+
+utouch-qml-1.0.4/src/utouchpincharea.h:
+ 14 class UTouchPinchArea : public ContinuousGestureArea {
+ 15   Q_OBJECT
+ 16   /**
+ 17    * This property holds the average radius of the touches.
+ 18    */
+ 19   Q_PROPERTY(GestureProperty* radius READ radius CONSTANT)
+
+
+Q1. Why are there both centroid and focus available?
+A1. XXX: not exactly known; but it seems that they are highly related, as
+modifications made to them are intermixed. According to comments accompanying
+the definitions, focus should mean 'initial' centroid, though we did observe
+in experiment that they differ (by no more than (1,1)) in some occasions, while
+in other occasions they are the same. For the time being, it'd be safe to ignore
+focus and use solely centroid.
+
+Q2. Why are there both 'initial' and 'current' centroid?
+A2. Yes, they are there for user's convenience; or else we'll have to keep them.
+
+

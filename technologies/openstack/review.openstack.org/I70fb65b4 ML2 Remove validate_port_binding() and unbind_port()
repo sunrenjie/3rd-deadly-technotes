@@ -1,0 +1,497 @@
+Change I70fb65b4: ML2: Remove validate_port_binding() and unbind_port()
+
+commit a57dc2c30ab78ba74cfc51b8fdb457d3374cc87d
+Author: Robert Kukura <kukura@noironetworks.com>
+Date:   Mon Mar 10 15:06:09 2014 -0400
+
+    ML2: Remove validate_port_binding() and unbind_port()
+    
+    The API implemented by ML2 mechanism drivers included three methods
+    related to port binding that were called within DB transactions, but
+    that could potentially involve communication with controllers or
+    devices that should not be done within transactions. A subsequent
+    patch will move the calls to bind_port() outside of tranactions. This
+    patch eliminates the other two methods from the MechanismDriver API.
+    
+    The validate_port_binding() method was previously called on the bound
+    mechanism driver to check whether an existing binding was still valid,
+    so that the port could be rebound if something changed. But since nova
+    has no way to handle changes to binding:vif_type or
+    binding:vif_details after a port is initially plugged, this turned out
+    not to be useful, so the method has been removed from the
+    MechanismDriver API. Now, once a port is successfully bound, the
+    binding remains until the port is deleted or any of it's
+    binding:host_id, binding:vnic_type, or binding:profile attribute
+    values are changed.
+    
+    The unbind_port() method was previously called on the bound mechanism
+    driver as an existing binding was removed. This method was not used by
+    any existing mechanism drivers, and was redundant with the
+    update_port_precommit() and update_port_postcommit() methods that are
+    called on all mechanism drivers when an existing binding is removed,
+    so this method has also been removed from the driver API.
+    
+    Eliminating the unbind_port() call allows the binding details to be
+    made available via the PortContext in delete_port_postcommit() calls,
+    completing the resolution of bug 1276395.
+    
+    Closes-bug: 1276395
+    Partial-bug: 1276391
+    Change-Id: I70fb65b478373c4f07f5273baa097fc50e5ba2ef
+
+Comments:
+1. It is generally more difficult to remove code than to add new. That's why
+   the author had to go to great length to explain the removal.
+2. But the necessity of this removal reflects flaws in the original design.
+
+Changes:
+ neutron/plugins/ml2/driver_api.py                  |   23 --------
+    + From the mechanism driver api class MechanismDriver removed two
+      interfaces validate_port_binding() and unbind_port().
+ .../ml2/drivers/cisco/nexus/mech_cisco_nexus.py    |    4 +-
+    + From cisco nexus mechanism driver class removed reference to
+      unbind_port().
+ neutron/plugins/ml2/drivers/mech_agent.py          |   57 ++++++--------------
+    + From the class AgentMechanismDriverBase removed methods
+      validate_port_binding() and unbind_port().
+    + Moved abstract method check_segment_for_agent() from
+      AgentMechanismDriverBase to its derived class
+      SimpleAgentMechanismDriverBase; updated doc strings to reflect the move.
+ neutron/plugins/ml2/drivers/mechanism_odl.py       |   12 -----
+    + From the OneDaylight mechanism driver class OpenDaylightMechanismDriver
+      removed definitions of methods validate_port_binding() and
+      unbind_port(), now that the abstract counterparts in base class
+      api.MechanismDriver has been removed.
+ neutron/plugins/ml2/managers.py                    |   44 ---------------
+    + From MechanismManager removed methods validate_port_binding() and
+      unbind_port(), which function by fetch the driver by binding and call
+      the corresponding interface functions in the driver to do the work. Now
+      that the two interface functions are removed, these two counterparts in
+      the manager are removed too.
+ neutron/plugins/ml2/plugin.py                      |   13 +++--
+    + At the plugin interface class Ml2Plugin, from the method
+      _process_port_binding(), removed reference to the to-be-removed methods
+      validate_port_binding() and unbind_port() from MechanismManager().
+      The functionality of updating port and binding of the process of
+      deleting existing port and binding info is delegated to the function
+      _delete_port_binding(), which is changed to manipulate port and binding
+      directly and locally, eliminating call to unbind_port() from mechanism
+      driver to do so.
+    + Still in Ml2Plugin, at delete_port(), removed call to
+      _delete_port_binding(mech_context), which, following a call to
+      delete_port_precommit() in the db transaction context, is considered
+      redundant, destructive (it prematurely destroys port and binding info
+      that may be needed by delete_port_precommit() and
+      delete_port_postcommit()), and inappropriate within database transaction
+      (previously it calls unbind_port() from mechanism driver). As a
+      consequence, _delete_port_binding() now is only referenced by
+      _process_port_binding(), which is referenced by create_port(),
+      update_port(), and NOT delete_port(). Likely the delete_port_precommit()
+      and delete_port_postcommit() functions will do the cleaning up tasks if
+      necessary.
+ neutron/tests/unit/ml2/_test_mech_agent.py         |    8 ---
+    + Removed all references to validate_port_binding() and unbind_port().
+ neutron/tests/unit/ml2/drivers/mechanism_logger.py |    6 ---
+    + Removed definition of validate_port_binding() and unbind_port() from
+      class LoggerMechanismDriver that simply log calls of their counterparts. 
+ neutron/tests/unit/ml2/drivers/mechanism_test.py   |   33 ++++++------
+    + Added bound_ports, of type set(), to class TestMechanismDriver as a
+      member, whose purpose is to maintain the sets of bound ports and to
+      assert (in _check_port_context()) that ports come and go as expected.
+ 9 files changed, 40 insertions(+), 160 deletions(-)
+
+diff --git a/neutron/plugins/ml2/driver_api.py b/neutron/plugins/ml2/driver_api.py
+index 78a37d9..d55240f 100644
+--- a/neutron/plugins/ml2/driver_api.py
++++ b/neutron/plugins/ml2/driver_api.py
+@@ -594,26 +594,3 @@ class MechanismDriver(object):
+         details.
+         """
+         pass
+-
+-    def validate_port_binding(self, context):
+-        """Check whether existing port binding is still valid.
+-
+-        :param context: PortContext instance describing the port
+-        :returns: True if binding is valid, otherwise False
+-
+-        Called inside transaction context on session to validate that
+-        the MechanismDriver's existing binding for the port is still
+-        valid.
+-        """
+-        return False
+-
+-    def unbind_port(self, context):
+-        """Undo existing port binding.
+-
+-        :param context: PortContext instance describing the port
+-
+-        Called inside transaction context on session to notify the
+-        MechanismDriver that its existing binding for the port is no
+-        longer valid.
+-        """
+-        pass
+diff --git a/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py b/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py
+index a5153f7..eca142a 100644
+--- a/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py
++++ b/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py
+@@ -153,7 +153,7 @@ class CiscoNexusMechanismDriver(api.MechanismDriver):
+         host_id = context.current.get(portbindings.HOST_ID)
+ 
+         # Workaround until vlan can be retrieved during delete_port_postcommit
+-        # (or prehaps unbind_port) event.
++        # event.
+         if func == self._delete_switch_entry:
+             vlan_id = self._delete_port_postcommit_vlan
+         else:
+@@ -168,7 +168,7 @@ class CiscoNexusMechanismDriver(api.MechanismDriver):
+             raise excep.NexusMissingRequiredFields(fields=fields)
+ 
+         # Workaround until vlan can be retrieved during delete_port_postcommit
+-        # (or prehaps unbind_port) event.
++        # event.
+         if func == self._delete_nxos_db:
+             self._delete_port_postcommit_vlan = vlan_id
+         else:
+diff --git a/neutron/plugins/ml2/drivers/mech_agent.py b/neutron/plugins/ml2/drivers/mech_agent.py
+index e0a5f70..6213443 100644
+--- a/neutron/plugins/ml2/drivers/mech_agent.py
++++ b/neutron/plugins/ml2/drivers/mech_agent.py
+@@ -35,8 +35,7 @@ class AgentMechanismDriverBase(api.MechanismDriver):
+     at least one segment of the port's network.
+ 
+     MechanismDrivers using this base class must pass the agent type to
+-    __init__(), and must implement try_to_bind_segment_for_agent() and
+-    check_segment_for_agent().
++    __init__(), and must implement try_to_bind_segment_for_agent().
+     """
+ 
+     def __init__(self, agent_type,
+@@ -75,26 +74,6 @@ class AgentMechanismDriverBase(api.MechanismDriver):
+                 LOG.warning(_("Attempting to bind with dead agent: %s"),
+                             agent)
+ 
+-    def validate_port_binding(self, context):
+-        LOG.debug(_("Validating binding for port %(port)s on "
+-                    "network %(network)s"),
+-                  {'port': context.current['id'],
+-                   'network': context.network.current['id']})
+-        for agent in context.host_agents(self.agent_type):
+-            LOG.debug(_("Checking agent: %s"), agent)
+-            if agent['alive'] and self.check_segment_for_agent(
+-                context.bound_segment, agent):
+-                LOG.debug(_("Binding valid"))
+-                return True
+-        LOG.warning(_("Binding invalid for port: %s"), context.current)
+-        return False
+-
+-    def unbind_port(self, context):
+-        LOG.debug(_("Unbinding port %(port)s on "
+-                    "network %(network)s"),
+-                  {'port': context.current['id'],
+-                   'network': context.network.current['id']})
+-
+     @abstractmethod
+     def try_to_bind_segment_for_agent(self, context, segment, agent):
+         """Try to bind with segment for agent.
+@@ -114,21 +93,6 @@ class AgentMechanismDriverBase(api.MechanismDriver):
+         return True. Otherwise, it must return False.
+         """
+ 
+-    @abstractmethod
+-    def check_segment_for_agent(self, segment, agent):
+-        """Check if segment can be bound for agent.
+-
+-        :param segment: segment dictionary describing segment to bind
+-        :param agent: agents_db entry describing agent to bind
+-        :returns: True iff segment can be bound for agent
+-
+-        Called inside transaction during validate_port_binding() so
+-        that derived MechanismDrivers can use agent_db data along with
+-        built-in knowledge of the corresponding agent's capabilities
+-        to determine whether or not the specified network segment can
+-        be bound for the agent.
+-        """
+-
+ 
+ @six.add_metaclass(ABCMeta)
+ class SimpleAgentMechanismDriverBase(AgentMechanismDriverBase):
+@@ -144,9 +108,7 @@ class SimpleAgentMechanismDriverBase(AgentMechanismDriverBase):
+ 
+     MechanismDrivers using this base class must pass the agent type
+     and the values for binding:vif_type and binding:vif_details to
+-    __init__(). They must implement check_segment_for_agent() as
+-    defined in AgentMechanismDriverBase, which will be called during
+-    both binding establishment and validation.
++    __init__(), and must implement check_segment_for_agent().
+     """
+ 
+     def __init__(self, agent_type, vif_type, vif_details,
+@@ -171,3 +133,18 @@ class SimpleAgentMechanismDriverBase(AgentMechanismDriverBase):
+             return True
+         else:
+             return False
++
++    @abstractmethod
++    def check_segment_for_agent(self, segment, agent):
++        """Check if segment can be bound for agent.
++
++        :param segment: segment dictionary describing segment to bind
++        :param agent: agents_db entry describing agent to bind
++        :returns: True iff segment can be bound for agent
++
++        Called inside transaction during bind_port so that derived
++        MechanismDrivers can use agent_db data along with built-in
++        knowledge of the corresponding agent's capabilities to
++        determine whether or not the specified network segment can be
++        bound for the agent.
++        """
+diff --git a/neutron/plugins/ml2/drivers/mechanism_odl.py b/neutron/plugins/ml2/drivers/mechanism_odl.py
+index 7937254..b099a5f 100644
+--- a/neutron/plugins/ml2/drivers/mechanism_odl.py
++++ b/neutron/plugins/ml2/drivers/mechanism_odl.py
+@@ -344,18 +344,6 @@ class OpenDaylightMechanismDriver(api.MechanismDriver):
+                            'physnet': segment[api.PHYSICAL_NETWORK],
+                            'nettype': segment[api.NETWORK_TYPE]})
+ 
+-    def validate_port_binding(self, context):
+-        if self.check_segment(context.bound_segment):
+-            LOG.debug(_('Binding valid.'))
+-            return True
+-        LOG.warning(_("Binding invalid for port: %s"), context.current)
+-
+-    def unbind_port(self, context):
+-        LOG.debug(_("Unbinding port %(port)s on "
+-                    "network %(network)s"),
+-                  {'port': context.current['id'],
+-                   'network': context.network.current['id']})
+-
+     def check_segment(self, segment):
+         """Verify a segment is valid for the OpenDaylight MechanismDriver.
+ 
+diff --git a/neutron/plugins/ml2/managers.py b/neutron/plugins/ml2/managers.py
+index e84f86f..d29d935 100644
+--- a/neutron/plugins/ml2/managers.py
++++ b/neutron/plugins/ml2/managers.py
+@@ -471,47 +471,3 @@ class MechanismManager(stevedore.named.NamedExtensionManager):
+         LOG.warning(_("Failed to bind port %(port)s on host %(host)s"),
+                     {'port': context._port['id'],
+                      'host': binding.host})
+-
+-    def validate_port_binding(self, context):
+-        """Check whether existing port binding is still valid.
+-
+-        :param context: PortContext instance describing the port
+-        :returns: True if binding is valid, otherwise False
+-
+-        Called inside transaction context on session to validate that
+-        the bound MechanismDriver's existing binding for the port is
+-        still valid.
+-        """
+-        binding = context._binding
+-        driver = self.mech_drivers.get(binding.driver, None)
+-        if driver:
+-            try:
+-                return driver.obj.validate_port_binding(context)
+-            except Exception:
+-                LOG.exception(_("Mechanism driver %s failed in "
+-                                "validate_port_binding"),
+-                              driver.name)
+-        return False
+-
+-    def unbind_port(self, context):
+-        """Undo existing port binding.
+-
+-        :param context: PortContext instance describing the port
+-
+-        Called inside transaction context on session to notify the
+-        bound MechanismDriver that its existing binding for the port
+-        is no longer valid.
+-        """
+-        binding = context._binding
+-        driver = self.mech_drivers.get(binding.driver, None)
+-        if driver:
+-            try:
+-                driver.obj.unbind_port(context)
+-            except Exception:
+-                LOG.exception(_("Mechanism driver %s failed in "
+-                                "unbind_port"),
+-                              driver.name)
+-        binding.vif_type = portbindings.VIF_TYPE_UNBOUND
+-        binding.vif_details = ''
+-        binding.driver = None
+-        binding.segment = None
+diff --git a/neutron/plugins/ml2/plugin.py b/neutron/plugins/ml2/plugin.py
+index f548b9d..a51dd35 100644
+--- a/neutron/plugins/ml2/plugin.py
++++ b/neutron/plugins/ml2/plugin.py
+@@ -226,11 +226,9 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
+ 
+         if binding.vif_type != portbindings.VIF_TYPE_UNBOUND:
+             if (not host_set and not vnic_type_set and not profile_set and
+-                binding.segment and
+-                self.mechanism_manager.validate_port_binding(mech_context)):
++                binding.segment):
+                 return False
+-            self.mechanism_manager.unbind_port(mech_context)
+-            self._update_port_dict_binding(port, binding)
++            self._delete_port_binding(mech_context)
+ 
+         # Return True only if an agent notification is needed.
+         # This will happen if a new host, vnic_type, or profile was specified
+@@ -294,10 +292,12 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
+ 
+     def _delete_port_binding(self, mech_context):
+         binding = mech_context._binding
++        binding.vif_type = portbindings.VIF_TYPE_UNBOUND
++        binding.vif_details = ''
++        binding.driver = None
++        binding.segment = None
+         port = mech_context.current
+         self._update_port_dict_binding(port, binding)
+-        self.mechanism_manager.unbind_port(mech_context)
+-        self._update_port_dict_binding(port, binding)
+ 
+     def _ml2_extend_port_dict_binding(self, port_res, port_db):
+         # None when called during unit tests for other plugins.
+@@ -720,7 +720,6 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
+             mech_context = driver_context.PortContext(self, context, port,
+                                                       network)
+             self.mechanism_manager.delete_port_precommit(mech_context)
+-            self._delete_port_binding(mech_context)
+             self._delete_port_security_group_bindings(context, id)
+             LOG.debug(_("Calling base delete_port"))
+             if l3plugin:
+diff --git a/neutron/tests/unit/ml2/_test_mech_agent.py b/neutron/tests/unit/ml2/_test_mech_agent.py
+index 6550574..4fbdc10 100644
+--- a/neutron/tests/unit/ml2/_test_mech_agent.py
++++ b/neutron/tests/unit/ml2/_test_mech_agent.py
+@@ -142,8 +142,6 @@ class AgentMechanismLocalTestCase(AgentMechanismBaseTestCase):
+                                   self.LOCAL_SEGMENTS)
+         self.driver.bind_port(context)
+         self._check_bound(context, self.LOCAL_SEGMENTS[1])
+-        self.assertTrue(self.driver.validate_port_binding(context))
+-        self.driver.unbind_port(context)
+ 
+     def test_type_local_dead(self):
+         context = FakePortContext(self.AGENT_TYPE,
+@@ -166,8 +164,6 @@ class AgentMechanismFlatTestCase(AgentMechanismBaseTestCase):
+                                   self.FLAT_SEGMENTS)
+         self.driver.bind_port(context)
+         self._check_bound(context, self.FLAT_SEGMENTS[1])
+-        self.assertTrue(self.driver.validate_port_binding(context))
+-        self.driver.unbind_port(context)
+ 
+     def test_type_flat_bad(self):
+         context = FakePortContext(self.AGENT_TYPE,
+@@ -191,8 +187,6 @@ class AgentMechanismVlanTestCase(AgentMechanismBaseTestCase):
+                                   self.VLAN_SEGMENTS)
+         self.driver.bind_port(context)
+         self._check_bound(context, self.VLAN_SEGMENTS[1])
+-        self.assertTrue(self.driver.validate_port_binding(context))
+-        self.driver.unbind_port(context)
+ 
+     def test_type_vlan_bad(self):
+         context = FakePortContext(self.AGENT_TYPE,
+@@ -215,8 +209,6 @@ class AgentMechanismGreTestCase(AgentMechanismBaseTestCase):
+                                   self.GRE_SEGMENTS)
+         self.driver.bind_port(context)
+         self._check_bound(context, self.GRE_SEGMENTS[1])
+-        self.assertTrue(self.driver.validate_port_binding(context))
+-        self.driver.unbind_port(context)
+ 
+     def test_type_gre_bad(self):
+         context = FakePortContext(self.AGENT_TYPE,
+diff --git a/neutron/tests/unit/ml2/drivers/mechanism_logger.py b/neutron/tests/unit/ml2/drivers/mechanism_logger.py
+index c23ef81..401badb 100644
+--- a/neutron/tests/unit/ml2/drivers/mechanism_logger.py
++++ b/neutron/tests/unit/ml2/drivers/mechanism_logger.py
+@@ -118,9 +118,3 @@ class LoggerMechanismDriver(api.MechanismDriver):
+ 
+     def bind_port(self, context):
+         self._log_port_call("bind_port", context)
+-
+-    def validate_port_binding(self, context):
+-        self._log_port_call("validate_port_binding", context)
+-
+-    def unbind_port(self, context):
+-        self._log_port_call("unbind_port", context)
+diff --git a/neutron/tests/unit/ml2/drivers/mechanism_test.py b/neutron/tests/unit/ml2/drivers/mechanism_test.py
+index a0c05c9..64b793a 100644
+--- a/neutron/tests/unit/ml2/drivers/mechanism_test.py
++++ b/neutron/tests/unit/ml2/drivers/mechanism_test.py
+@@ -21,7 +21,7 @@ class TestMechanismDriver(api.MechanismDriver):
+     """Test mechanism driver for testing mechanism driver api."""
+ 
+     def initialize(self):
+-        pass
++        self.bound_ports = set()
+ 
+     def _check_network_context(self, context, original_expected):
+         assert(isinstance(context, api.NetworkContext))
+@@ -87,13 +87,16 @@ class TestMechanismDriver(api.MechanismDriver):
+ 
+         vif_type = context.current.get(portbindings.VIF_TYPE)
+         assert(vif_type is not None)
++
+         if vif_type in (portbindings.VIF_TYPE_UNBOUND,
+                         portbindings.VIF_TYPE_BINDING_FAILED):
+             assert(context.bound_segment is None)
+             assert(context.bound_driver is None)
++            assert(context.current['id'] not in self.bound_ports)
+         else:
+             assert(isinstance(context.bound_segment, dict))
+             assert(context.bound_driver == 'test')
++            assert(context.current['id'] in self.bound_ports)
+ 
+         if original_expected:
+             assert(isinstance(context.original, dict))
+@@ -123,6 +126,9 @@ class TestMechanismDriver(api.MechanismDriver):
+         self._check_port_context(context, False)
+ 
+     def update_port_precommit(self, context):
++        if (context.original_bound_driver == 'test' and
++            context.bound_driver != 'test'):
++            self.bound_ports.remove(context.original['id'])
+         self._check_port_context(context, True)
+ 
+     def update_port_postcommit(self, context):
+@@ -135,6 +141,12 @@ class TestMechanismDriver(api.MechanismDriver):
+         self._check_port_context(context, False)
+ 
+     def bind_port(self, context):
++        # REVISIT(rkukura): The upcoming fix for bug 1276391 will
++        # ensure the MDs see the unbinding of the port as a port
++        # update prior to re-binding, at which point this should be
++        # removed.
++        self.bound_ports.discard(context.current['id'])
++
+         # REVISIT(rkukura): Currently, bind_port() is called as part
+         # of either a create or update transaction. The fix for bug
+         # 1276391 will change it to be called outside any transaction,
+@@ -146,23 +158,8 @@ class TestMechanismDriver(api.MechanismDriver):
+         if host == "host-ovs-no_filter":
+             context.set_binding(segment, portbindings.VIF_TYPE_OVS,
+                                 {portbindings.CAP_PORT_FILTER: False})
++            self.bound_ports.add(context.current['id'])
+         elif host == "host-bridge-filter":
+             context.set_binding(segment, portbindings.VIF_TYPE_BRIDGE,
+                                 {portbindings.CAP_PORT_FILTER: True})
+-
+-    def validate_port_binding(self, context):
+-        # REVISIT(rkukura): Currently, validate_port_binding() is
+-        # called as part of either a create or update transaction. The
+-        # fix for bug 1276391 will change it to be called outside any
+-        # transaction (or eliminate it altogether), so the
+-        # context.original* will no longer be available.
+-        self._check_port_context(context, context.original is not None)
+-        return True
+-
+-    def unbind_port(self, context):
+-        # REVISIT(rkukura): Currently, unbind_port() is called as part
+-        # of either an update or delete transaction. The fix for bug
+-        # 1276391 will change it to be called outside any transaction
+-        # (or eliminate it altogether), so the context.original* will
+-        # no longer be available.
+-        self._check_port_context(context, context.original is not None)
++            self.bound_ports.add(context.current['id'])

@@ -1,0 +1,55 @@
+Here we discuss various topics about English dictionaries that help in our
+day-to-day life and work.
+
+Revision history:
+20120322: creation
+20120513: addition of many more (from Merriam-Webster series of dictionary); I
+          think this topic is nearly exhausted now.
+
+Availability
+
+0. Cambridge Advanced Learner's Dictionary
+   Working under Symbian, iPad
+1. Oxford Advanced Learner's Dictionary 8 (OALD8)
+   Relatively modern in terms of technology; just working in Windows up to XP/
+   Server 2003, Linux(under wine), MacOSX, and iPad (at a price of 192RMB).
+2. Oxford English Dictionary 2.0 v1.14 (OED2)
+   Based on Windows 3.x; working in Windows up to XP, Server 2003, wine under
+   linux, mac os x.
+3. Oxford Dictionary of English (ODE)
+   Working under Symbian, iPad
+4. Merriam-Webster series of dictionary:
+   + Merriam-Webster's 11th Collegiate Dictionary
+   + Merriam-Webster's Collegiate Thesaurus
+   + Merriam-Webster's Unabridged Dictionary
+   Working under Windows XP and Server 2003, and Linux (thru wine); available
+   in iPad and Symbian.
+5. American Heritage Dictionary, 4th Edition
+   Available in Windows, Linux+wine and iPad.
+6. Longman Dictionary of Contemporary English, 5th Edition
+   Available in Windows, Linux+wine, MAC, and iPad.
+7. Collins Cobuild Advanced Learner's English Dictionary, Fifth Edition
+   Available at least in Windows, iPad.
+8. The Free Dictionary
+   This free, online dictionary requires only a browser or dedicated client
+   software plus an internet connection. It deserves special notice because of
+   its various content sources:
+   + Wikipedia
+   + The American Heritage® Dictionary of the English Language, Fourth Edition
+   + Collins English Dictionary – Complete and Unabridged
+   + ...
+
+In addition, there is a generic dictionary manager 'lingoes' with which you
+could have these dictionaries available at least:
++ American Heritage Dictionary 4th Edition
++ American Heritage Dictionary
++ Cambridge Advanced Learner's Dictionary
++ Collins COBUILD Advanced Learner's English Dictionary
++ Longman Dictionary of Contemporary English
++ MacMillan English Dictionary - American
++ Oxford Advanced Learner's Dictionary
+
+This software has the powerful feature of capturing screen text and displaying
+corresponding dictionary content. Unfortunately, it is Windows only. The UI is
+abnormal under wine in Linux.
+

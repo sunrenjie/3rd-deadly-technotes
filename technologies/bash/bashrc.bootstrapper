@@ -1,0 +1,8 @@
+# get directory containing this script; stolen from
+# http://stackoverflow.com/questions/59895/can-a-bash-script-tell-what-directory-its-stored-in
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+for f in $(ls $DIR/bashrc.enabled/*.sh 2>/dev/null); do
+  source $f
+done
+

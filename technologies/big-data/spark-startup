@@ -1,0 +1,15 @@
+spark start-up:
+
+start master (default spark port 7077, default spark ui port 8080):
+sbin/start-master.sh
+
+goto http://localhost:8080/, get the url (e.g., spark://Renjies-MacBook-Air.local:7077), use it to start worker(s):
+
+spark-class org.apache.spark.deploy.worker.Worker spark://Renjies-MacBook-Air.local:7077 -c 1 -m 256M
+
+to submit a job:
+spark-submit --master spark://Renjies-MacBook-Air.local:7077 --executor-memory 128M --class com.oreilly.learningsparkexamples.mini.scala.WordCount target/scala-2.10/learning-spark-mini-example_2.10-0.0.1.jar ./README.md WC22
+
+to connect and open console:
+pyspark --master spark://Renjies-MacBook-Air.local:7077 --executor-memory 256M
+

@@ -1,0 +1,31 @@
+
+This document keeps track of origin of files to the most extent.
+
+Aug 18, 2011
+
+
+----------------
+historical notes
+
+unverified/JOS/lab1_modified is most similar to pdos.csail.mit.edu/6.828/2006/lab1/lab1,
+by content.
+----------------
+Dir 'ocw.mit.edu/6-828-fall-2006/' contains essentials extracted from the archive:
+http://ocw.mit.edu/ans15436/ZipForEndUsers/6/6-828-fall-2006/6-828-fall-2006.zip
+
+pdos.csail.mit.edu/6.828/2006 and 2007 contains contents from
+http://pdos.csail.mit.edu/6.828/2006 and 2007.
+Please notice that lab5 and lab6 .tar.gz (for both 2006 and 2007) can not be downloaded.
+
+pdos.csail.mit.edu/6.828/2008 contains contents from
+http://pdos.csail.mit.edu/6.828/2008
+Since 2008, git is used to repo source code instead of .tar.gz
+git clone http://pdos.csail.mit.edu/6.828/2008/labrepo/ lab and tar -czf
+For git related stuff, see
+http://pdos.csail.mit.edu/6.828/2008/labs/git-notes.txt
+and
+http://pdos.csail.mit.edu/6.828/2008/labs/lab1/lab1.html
+
+PC Assembly Language Book: unverified/mit-6.828/pcasm.pdf
+
+

@@ -1,0 +1,285 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>/private/tmp/20140731-Ib71a0140-Fix-DB-Duplicate-error-when-scheduling-distributed-routers.html</title>
+<meta name="Generator" content="Vim/7.3">
+<meta name="plugin-version" content="vim7.3_v6">
+<meta name="syntax" content="git">
+<meta name="settings" content="use_css,number_lines">
+<style type="text/css">
+<!--
+pre { font-family: monospace; color: #000000; background-color: #ffffff; }
+body { font-family: monospace; color: #000000; background-color: #ffffff; }
+.lnr { color: #af5f00; }
+.PreProc { color: #c000c0; }
+.Type { color: #008000; }
+.Special { color: #c000c0; }
+.Constant { color: #c00000; }
+.Identifier { color: #008080; }
+.Statement { color: #af5f00; }
+-->
+</style>
+</head>
+<body>
+<h3>NOTE for Change 'Fix DB Duplicate error when scheduling distributed routers'.</h3>
+<pre>
+1. This change fixes an error detected and raised by code introduced in another
+   change 'Race condition of L3-agent to add/remove routers'.
+2. [context] L3Scheduler._schedule_router() does two things: call
+   plugin.schedule_snat_router() (plugin will be an object of L3RouterPlugin,
+   and this method is defined in its base class L3_DVRsch_db_mixin) if the
+   router is distributed, call self.get_candidates() to get a set of agent
+   candidates for which self.bind_router() is called. Previously, the call
+   order is incorrect: the call to plugin.schedule_snat_router() is 'inserted'
+   between candidates retrieval and using. Since plugin.schedule_snat_router()
+   will indirectly call bind_dvr_router_servicenode(), and this method may add
+   a router-agent pair already in table CentralizedSnatL3AgentBinding to table
+   RouterL3AgentBinding, a little inconsistency between agent candidates
+   retrieval and using happens because of the insertion: self.bind_router()
+   will be called on behalf of a router-agent pair already existing in the
+   table RouterL3AgentBinding, and try to insert it into the same table.
+   This will not generate error until the commitment of this another change,
+   which mark the agent and router as ForeignKey, effectively making the
+   database complain on database entry duplicates.
+3. [summary] The inconsistency is fixed by re-order the calling sequence in
+   L3Scheduler._schedule_router().
+
+<hr>
+<span class="lnr">  1 </span><span class="Statement">commit</span> <span class="Identifier">0b4e42fe11bf918e18ea8f240d9055b3967b60bb</span>
+<span class="lnr">  2 </span><span class="Statement">Author:</span> <span class="Constant">armando-migliaccio </span><span class="Special">&lt;</span><span class="Special">armamig@gmail.com</span><span class="Special">&gt;</span>
+<span class="lnr">  3 </span><span class="Statement">Date:</span>   <span class="Constant">Thu Jul 31 19:20:00 2014 -0700</span>
+<span class="lnr">  4 </span>
+<span class="lnr">  5 </span>    Fix DB Duplicate error when scheduling distributed routers
+<span class="lnr">  6 </span>
+<span class="lnr">  7 </span>    The error was caused by binding the router to an agent
+<span class="lnr">  8 </span>    candidate that was already selected during the scheduling
+<span class="lnr">  9 </span>    process.
+<span class="lnr"> 10 </span>
+<span class="lnr"> 11 </span>    A DB lookup was also saved by passing the router object
+<span class="lnr"> 12 </span>    around; this led to a minor style cleanup.
+<span class="lnr"> 13 </span>
+<span class="lnr"> 14 </span>    Closes-bug: #1351123
+<span class="lnr"> 15 </span>
+<span class="lnr"> 16 </span>    Change-Id: Ib71a0140c8a7fbd5b230609d33487f8adba252e7
+<span class="lnr"> 17 </span>---
+<span class="lnr"> 18 </span> neutron/db/l3_dvrscheduler_db.py         | 22 ++++++++++------------
+<span class="lnr"> 19 </span> neutron/scheduler/l3_agent_scheduler.py  |  7 ++++---
+<span class="lnr"> 20 </span> neutron/tests/unit/test_l3_schedulers.py | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+<span class="lnr"> 21 </span> 3 files changed, 63 insertions(+), 15 deletions(-)
+<span class="lnr"> 22 </span>
+<span class="lnr"> 23 </span><span class="Type">diff --git a/neutron/db/l3_dvrscheduler_db.py b/neutron/db/l3_dvrscheduler_db.py</span>
+<span class="lnr"> 24 </span>index 276faed..686be11 100644
+<span class="lnr"> 25 </span><span class="Type">--- a/neutron/db/l3_dvrscheduler_db.py</span>
+<span class="lnr"> 26 </span><span class="Type">+++ b/neutron/db/l3_dvrscheduler_db.py</span>
+<span class="lnr"> 27 </span><span class="Statement">@@ -248,27 +248,25 @@</span><span class="PreProc"> class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):</span>
+<span class="lnr"> 28 </span>         LOG.debug('Removed binding for router %(router_id)s and '
+<span class="lnr"> 29 </span>                   'agent %(id)s', {'router_id': router_id, 'id': agent_id})
+<span class="lnr"> 30 </span>
+<span class="lnr"> 31 </span><span class="Special">-    def schedule_snat_router(self, context, router_id, gw_exists):</span>
+<span class="lnr"> 32 </span><span class="Identifier">+    def schedule_snat_router(self, context, router_id, sync_router, gw_exists):</span>
+<span class="lnr"> 33 </span>         &quot;&quot;&quot;Schedule the snat router on l3 service agent.&quot;&quot;&quot;
+<span class="lnr"> 34 </span>         if gw_exists:
+<span class="lnr"> 35 </span><span class="Special">-            query = (context.session.</span>
+<span class="lnr"> 36 </span><span class="Special">-                     query(CentralizedSnatL3AgentBinding).</span>
+<span class="lnr"> 37 </span><span class="Special">-                     filter_by(router_id=router_id))</span>
+<span class="lnr"> 38 </span><span class="Special">-            for bind in query:</span>
+<span class="lnr"> 39 </span><span class="Special">-                agt_id = bind.l3_agent_id</span>
+<span class="lnr"> 40 </span><span class="Identifier">+            binding = (context.session.</span>
+<span class="lnr"> 41 </span><span class="Identifier">+                       query(CentralizedSnatL3AgentBinding).</span>
+<span class="lnr"> 42 </span><span class="Identifier">+                       filter_by(router_id=router_id).first())</span>
+<span class="lnr"> 43 </span><span class="Identifier">+            if binding:</span>
+<span class="lnr"> 44 </span><span class="Identifier">+                l3_agent_id = binding.l3_agent_id</span>
+<span class="lnr"> 45 </span><span class="Identifier">+                l3_agent = binding.l3_agent</span>
+<span class="lnr"> 46 </span>                 LOG.debug('SNAT Router %(router_id)s has already been '
+<span class="lnr"> 47 </span>                           'hosted by L3 agent '
+<span class="lnr"> 48 </span><span class="Special">-                          '%(agent_id)s', {'router_id': router_id,</span>
+<span class="lnr"> 49 </span><span class="Special">-                                           'agent_id': agt_id})</span>
+<span class="lnr"> 50 </span><span class="Special">-                self.bind_dvr_router_servicenode(context,</span>
+<span class="lnr"> 51 </span><span class="Special">-                                                 router_id,</span>
+<span class="lnr"> 52 </span><span class="Special">-                                                 bind.l3_agent)</span>
+<span class="lnr"> 53 </span><span class="Identifier">+                          '%(l3_agent_id)s', {'router_id': router_id,</span>
+<span class="lnr"> 54 </span><span class="Identifier">+                                              'l3_agent_id': l3_agent_id})</span>
+<span class="lnr"> 55 </span><span class="Identifier">+                self.bind_dvr_router_servicenode(context, router_id, l3_agent)</span>
+<span class="lnr"> 56 </span>                 return
+<span class="lnr"> 57 </span>             active_l3_agents = self.get_l3_agents(context, active=True)
+<span class="lnr"> 58 </span>             if not active_l3_agents:
+<span class="lnr"> 59 </span>                 LOG.warn(_('No active L3 agents'))
+<span class="lnr"> 60 </span>                 return
+<span class="lnr"> 61 </span><span class="Special">-            sync_router = self.get_router(context, router_id)</span>
+<span class="lnr"> 62 </span>             snat_candidates = self.get_snat_candidates(sync_router,
+<span class="lnr"> 63 </span>                                                        active_l3_agents)
+<span class="lnr"> 64 </span>             if snat_candidates:
+<span class="lnr"> 65 </span><span class="Type">diff --git a/neutron/scheduler/l3_agent_scheduler.py b/neutron/scheduler/l3_agent_scheduler.py</span>
+<span class="lnr"> 66 </span>index a85015d..265d201 100644
+<span class="lnr"> 67 </span><span class="Type">--- a/neutron/scheduler/l3_agent_scheduler.py</span>
+<span class="lnr"> 68 </span><span class="Type">+++ b/neutron/scheduler/l3_agent_scheduler.py</span>
+<span class="lnr"> 69 </span><span class="Statement">@@ -196,11 +196,12 @@</span><span class="PreProc"> class L3Scheduler(object):</span>
+<span class="lnr"> 70 </span>                          candidates=None, hints=None):
+<span class="lnr"> 71 </span>         sync_router = plugin.get_router(context, router_id)
+<span class="lnr"> 72 </span>         subnet_id = hints.get('subnet_id') if hints else None
+<span class="lnr"> 73 </span><span class="Special">-        candidates = candidates or self.get_candidates(</span>
+<span class="lnr"> 74 </span><span class="Special">-            plugin, context, sync_router, subnet_id)</span>
+<span class="lnr"> 75 </span>         if (hints and 'gw_exists' in hints
+<span class="lnr"> 76 </span>             and sync_router.get('distributed', False)):
+<span class="lnr"> 77 </span><span class="Special">-            plugin.schedule_snat_router(context, router_id, sync_router)</span>
+<span class="lnr"> 78 </span><span class="Identifier">+            plugin.schedule_snat_router(</span>
+<span class="lnr"> 79 </span><span class="Identifier">+                context, router_id, sync_router, hints['gw_exists'])</span>
+<span class="lnr"> 80 </span><span class="Identifier">+        candidates = candidates or self.get_candidates(</span>
+<span class="lnr"> 81 </span><span class="Identifier">+            plugin, context, sync_router, subnet_id)</span>
+<span class="lnr"> 82 </span>         if not candidates:
+<span class="lnr"> 83 </span>             return
+<span class="lnr"> 84 </span>         if sync_router.get('distributed', False):
+<span class="lnr"> 85 </span><span class="Type">diff --git a/neutron/tests/unit/test_l3_schedulers.py b/neutron/tests/unit/test_l3_schedulers.py</span>
+<span class="lnr"> 86 </span>index b794163..4936017 100644
+<span class="lnr"> 87 </span><span class="Type">--- a/neutron/tests/unit/test_l3_schedulers.py</span>
+<span class="lnr"> 88 </span><span class="Type">+++ b/neutron/tests/unit/test_l3_schedulers.py</span>
+<span class="lnr"> 89 </span><span class="Statement">@@ -21,6 +21,7 @@</span><span class="PreProc"> import uuid</span>
+<span class="lnr"> 90 </span>
+<span class="lnr"> 91 </span> import mock
+<span class="lnr"> 92 </span> from oslo.config import cfg
+<span class="lnr"> 93 </span><span class="Identifier">+from sqlalchemy.orm import query</span>
+<span class="lnr"> 94 </span>
+<span class="lnr"> 95 </span> from neutron.api.v2 import attributes as attr
+<span class="lnr"> 96 </span> from neutron.common import constants
+<span class="lnr"> 97 </span><span class="Statement">@@ -129,6 +130,36 @@</span><span class="PreProc"> class L3SchedulerTestCase(l3_agentschedulers_db.L3AgentSchedulerDbMixin,</span>
+<span class="lnr"> 98 </span>             router['router']['id'], subnet['subnet']['network_id'])
+<span class="lnr"> 99 </span>         self._delete('routers', router['router']['id'])
+<span class="lnr">100 </span>
+<span class="lnr">101 </span><span class="Identifier">+    def test_schedule_router_distributed(self):</span>
+<span class="lnr">102 </span><span class="Identifier">+        scheduler = l3_agent_scheduler.ChanceScheduler()</span>
+<span class="lnr">103 </span><span class="Identifier">+        agent = agents_db.Agent()</span>
+<span class="lnr">104 </span><span class="Identifier">+        agent.admin_state_up = True</span>
+<span class="lnr">105 </span><span class="Identifier">+        agent.heartbeat_timestamp = timeutils.utcnow()</span>
+<span class="lnr">106 </span><span class="Identifier">+        sync_router = {</span>
+<span class="lnr">107 </span><span class="Identifier">+            'id': 'foo_router_id',</span>
+<span class="lnr">108 </span><span class="Identifier">+            'distributed': True</span>
+<span class="lnr">109 </span><span class="Identifier">+        }</span>
+<span class="lnr">110 </span><span class="Identifier">+        plugin = mock.Mock()</span>
+<span class="lnr">111 </span><span class="Identifier">+        plugin.get_router.return_value = sync_router</span>
+<span class="lnr">112 </span><span class="Identifier">+        plugin.get_l3_agents_hosting_routers.return_value = []</span>
+<span class="lnr">113 </span><span class="Identifier">+        plugin.get_l3_agents.return_value = [agent]</span>
+<span class="lnr">114 </span><span class="Identifier">+        plugin.get_l3_agent_candidates.return_value = [agent]</span>
+<span class="lnr">115 </span><span class="Identifier">+        with mock.patch.object(scheduler, 'bind_router'):</span>
+<span class="lnr">116 </span><span class="Identifier">+            scheduler._schedule_router(</span>
+<span class="lnr">117 </span><span class="Identifier">+                plugin, self.adminContext,</span>
+<span class="lnr">118 </span><span class="Identifier">+                'foo_router_id', None, {'gw_exists': True})</span>
+<span class="lnr">119 </span><span class="Identifier">+        expected_calls = [</span>
+<span class="lnr">120 </span><span class="Identifier">+            mock.call.get_router(mock.ANY, 'foo_router_id'),</span>
+<span class="lnr">121 </span><span class="Identifier">+            mock.call.schedule_snat_router(</span>
+<span class="lnr">122 </span><span class="Identifier">+                mock.ANY, 'foo_router_id', sync_router, True),</span>
+<span class="lnr">123 </span><span class="Identifier">+            mock.call.get_l3_agents_hosting_routers(</span>
+<span class="lnr">124 </span><span class="Identifier">+                mock.ANY, ['foo_router_id'], admin_state_up=True),</span>
+<span class="lnr">125 </span><span class="Identifier">+            mock.call.get_l3_agents(mock.ANY, active=True),</span>
+<span class="lnr">126 </span><span class="Identifier">+            mock.call.get_l3_agent_candidates(</span>
+<span class="lnr">127 </span><span class="Identifier">+                mock.ANY, sync_router, [agent], None),</span>
+<span class="lnr">128 </span><span class="Identifier">+        ]</span>
+<span class="lnr">129 </span><span class="Identifier">+        plugin.assert_has_calls(expected_calls)</span>
+<span class="lnr">130 </span><span class="Identifier">+</span>
+<span class="lnr">131 </span>     def _test_schedule_bind_router(self, agent, router):
+<span class="lnr">132 </span>         ctx = self.adminContext
+<span class="lnr">133 </span>         session = ctx.session
+<span class="lnr">134 </span><span class="Statement">@@ -381,3 +412,21 @@</span><span class="PreProc"> class L3DvrSchedulerTestCase(base.BaseTestCase):</span>
+<span class="lnr">135 </span>                                                     'thisHost', 'dvr_port1',
+<span class="lnr">136 </span>                                                     sub_ids)
+<span class="lnr">137 </span>             self.assertFalse(result)
+<span class="lnr">138 </span><span class="Identifier">+</span>
+<span class="lnr">139 </span><span class="Identifier">+    def test_schedule_snat_router_with_snat_candidates(self):</span>
+<span class="lnr">140 </span><span class="Identifier">+        agent = agents_db.Agent()</span>
+<span class="lnr">141 </span><span class="Identifier">+        agent.admin_state_up = True</span>
+<span class="lnr">142 </span><span class="Identifier">+        agent.heartbeat_timestamp = timeutils.utcnow()</span>
+<span class="lnr">143 </span><span class="Identifier">+        with contextlib.nested(</span>
+<span class="lnr">144 </span><span class="Identifier">+            mock.patch.object(query.Query, 'first'),</span>
+<span class="lnr">145 </span><span class="Identifier">+            mock.patch.object(self.dut, 'get_l3_agents'),</span>
+<span class="lnr">146 </span><span class="Identifier">+            mock.patch.object(self.dut, 'get_snat_candidates'),</span>
+<span class="lnr">147 </span><span class="Identifier">+            mock.patch.object(self.dut, 'bind_snat_servicenode')) as (</span>
+<span class="lnr">148 </span><span class="Identifier">+                mock_query, mock_agents, mock_candidates, mock_bind):</span>
+<span class="lnr">149 </span><span class="Identifier">+            mock_query.return_value = []</span>
+<span class="lnr">150 </span><span class="Identifier">+            mock_agents.return_value = [agent]</span>
+<span class="lnr">151 </span><span class="Identifier">+            mock_candidates.return_value = [agent]</span>
+<span class="lnr">152 </span><span class="Identifier">+            self.dut.schedule_snat_router(</span>
+<span class="lnr">153 </span><span class="Identifier">+                self.adminContext, 'foo_router_id', mock.ANY, True)</span>
+<span class="lnr">154 </span><span class="Identifier">+        mock_bind.assert_called_once_with(</span>
+<span class="lnr">155 </span><span class="Identifier">+            self.adminContext, 'foo_router_id', [agent])</span>
+</pre>
+<hr>
+<pre>
+<h3>APPENDIX A. connection between the service plugin L3RouterPlugin and L3 agent scheduler</h3>
+(source reference point: commit 0b4e42fe11bf918e18ea8f240d9055b3967b60bb, precisely this commit)
+
+<strong>plugins L3Scheduler</strong>:
+
+etc/neutron.conf:150:# router_scheduler_driver = neutron.scheduler.l3_agent_scheduler.ChanceScheduler
+
+neutron/services/l3_router/README:30:service_plugins = neutron.services.l3_router.l3_router_plugin.L3RouterPlugin
+
+neutron/services/l3_router/l3_router_plugin.py:44:class L3RouterPlugin(common_db_mixin.CommonDbMixin,
+neutron/services/l3_router/l3_router_plugin.py:45:                     extraroute_db.ExtraRoute_db_mixin,
+neutron/services/l3_router/l3_router_plugin.py:46:                     l3_dvr_db.L3_NAT_with_dvr_db_mixin,
+neutron/services/l3_router/l3_router_plugin.py:47:                     l3_gwmode_db.L3_NAT_db_mixin,
+neutron/services/l3_router/l3_router_plugin.py:48:                     l3_dvrscheduler_db.L3_DVRsch_db_mixin):
+
+neutron/services/l3_router/l3_router_plugin.py:62:    def __init__(self):
+neutron/services/l3_router/l3_router_plugin.py:63:        qdbapi.register_models(base=model_base.BASEV2)
+neutron/services/l3_router/l3_router_plugin.py:64:        self.setup_rpc()
+neutron/services/l3_router/l3_router_plugin.py:65:        self.router_scheduler = importutils.import_object(
+neutron/services/l3_router/l3_router_plugin.py:66:            cfg.CONF.router_scheduler_driver)
+
+neutron/db/l3_dvrscheduler_db.py:51:class L3_DVRsch_db_mixin(l3agent_sch_db.L3AgentSchedulerDbMixin):
+
+neutron/db/l3_agentschedulers_db.py:54:class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
+neutron/db/l3_agentschedulers_db.py:55:                              agentschedulers_db.AgentSchedulerDbMixin):
+...
+neutron/db/l3_agentschedulers_db.py:346:    def schedule_router(self, context, router, candidates=None, hints=None):
+neutron/db/l3_agentschedulers_db.py:347:        if self.router_scheduler:
+neutron/db/l3_agentschedulers_db.py:348:            return self.router_scheduler.schedule(
+neutron/db/l3_agentschedulers_db.py:349:                self, context, router, candidates=candidates, hints=hints)
++ Here the service plugin calls the agent scheduler's schedule() method, with
+  itself as value of parameter plugin.
+
+<strong>agent scheduler</strong>:
+neutron/scheduler/l3_agent_scheduler.py:34:@six.add_metaclass(abc.ABCMeta)
+neutron/scheduler/l3_agent_scheduler.py:35:class L3Scheduler(object):
+neutron/scheduler/l3_agent_scheduler.py:36:
+neutron/scheduler/l3_agent_scheduler.py:37:    @abc.abstractmethod
+neutron/scheduler/l3_agent_scheduler.py:38:    def schedule(self, plugin, context, router_id,
+neutron/scheduler/l3_agent_scheduler.py:39:                 candidates=None, hints=None):
+neutron/scheduler/l3_agent_scheduler.py:40:        """Schedule the router to an active L3 agent.
+neutron/scheduler/l3_agent_scheduler.py:41:
+neutron/scheduler/l3_agent_scheduler.py:42:        Schedule the router only if it is not already scheduled.
+neutron/scheduler/l3_agent_scheduler.py:43:        """
+neutron/scheduler/l3_agent_scheduler.py:44:        pass
+
+</pre>
+<hr>
+<h3>APPENDIX B. Bug Description</h3>
+<p>Taken from the bug description page at <a href="https://bugs.launchpad.net/neutron/+bug/1351123">https://bugs.launchpad.net/neutron/+bug/1351123</a>.</p>
+  </div>
+
+  <div id="yui_3_10_3_1_1408670157921_148" class="yui3-editable_text-text"><p id="yui_3_10_3_1_1408670157921_147">I observed this error here:</p>
+<p><a rel="nofollow" href="http://logs.openstack.org/77/108177/10/experimental/check-tempest-dsvm-neutron-dvr/9e67d95/logs/screen-q-svc.txt.gz?level=TRACE#_2014-07-31_15_05_48_864">http://<wbr>logs.openstack.<wbr>org/77/<wbr>108177/<wbr>10/experimental<wbr>/check-<wbr>tempest-<wbr>dsvm-neutron-<wbr>dvr/9e67d95/<wbr>logs/screen-<wbr>q-svc.txt.<wbr>gz?level=<wbr>TRACE#_<wbr>2014-07-<wbr>31_15_05_<wbr>48_864</a></p>
+<p>And in few other places. This seems to be triggered (for instance) during the following testcase:</p>
+<p>tempest.<wbr>scenario[<wbr>...]test_<wbr>server_<wbr>connectivity_<wbr>pause_unpause</p>
+<p>It looks like the scheduling process fails because of a duplicate entry to the agent/router binding table. This might be an effect of fix:</p>
+<p><a rel="nofollow" href="https://review.openstack.org/#/c/73234/">https:/<wbr>/review.<wbr>openstack.<wbr>org/#/c/<wbr>73234/</a></p></div>
+  </div>
+<hr>
+<pre>
+<h3>APPENDIX C. How do we interpret the bug?</h3>
+The main point of the error log as mentioned in the bug report is the call
+trace. It tells us that the clauses in 'except db_exc.DBDuplicateEntry' in
+neutron/scheduler/l3_agent_scheduler.py near line 187 are being executed. On
+the other hand, the repeated message of 'No L3 agents can host the router ...'
+is irrelevant and possibly a bit misleading. Another observation is that a
+router-agent pair is already inserted into RouterL3AgentBinding in
+bind_dvr_router_servicenode() for sure, as the relevant DEBUG message
+immediately before the error message reveals.
+
+In addition, the accompanying test cases are not quite lightening about the
+main point of the bug: they merely ensure that the calls generated are exactly
+the same as the modified code does. As a number of other trivial yet related
+improvements are made in the change, the test cases are even further away from
+being illuminating.
+</pre>
+</body>
+</html>

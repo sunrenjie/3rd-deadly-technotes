@@ -1,0 +1,41 @@
+
+On file-system-accessing user land library code in lib dir
+
+code excerpts from lib/file.c:
+     13 struct Dev devfile =
+     14 {
+     15         .dev_id =       'f',
+     16         .dev_name =     "file",
+     17         .dev_read =     file_read,
+     18         .dev_write =    file_write,
+     19         .dev_close =    file_close,
+     20         .dev_stat =     file_stat,
+     21         .dev_trunc =    file_trunc
+     22 };
+
+31 open(const char *path, int mode)
+51:	if ((r = fsipc_open(path, mode, fd)) < 0)
+71:file_close(struct Fd *fd)
+82:	return fsipc_close(fd->fd_file.id);
+89:file_read(struct Fd *fd, void *buf, size_t n, off_t offset)
+129:file_write(struct Fd *fd, const void *buf, size_t n, off_t offset)
+151:file_stat(struct Fd *fd, struct Stat *st)
+161:file_trunc(struct Fd *fd, off_t newsize)
+172:	if ((r = fsipc_set_size(fileid, newsize)) < 0)
+197:		if ((r = fsipc_map(fd->fd_file.id, i, va + i)) < 0) {
+229:			    && (r = fsipc_dirty(fd->fd_file.id, i)) < 0)
+240:	return fsipc_remove(path);
+247:	return fsipc_sync();
+
+Note:
+1. The standard interfaces for accessing a device are read, write, stat, trunc,
+   seek, close, as defined in lib/fd.c. The seek operation is special in that
+   it is implemented without help from device-specific operations. For file
+   device in particular, the interfaces are defined in lib/file.c:
+   + file_read: implemented in terms of memcpy(), as open() will map the whole
+     file into memory.
+   + file_write: implemented in terms of memcpy(); the results will be written
+     to disk by funmap() called by file_close().
+   + file_stat: simply fill the struct Stat passed in.
+   + file_trunc: implemented in terms of fsipc_set_size(), fmap(), and funmap().
+   + file_close: implemented in terms of fsipc_close(), funmap().

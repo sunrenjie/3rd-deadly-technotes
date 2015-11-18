@@ -1,0 +1,214 @@
+
+Jan 13, 2011
+
+We wish to evaluate the possibility to compile mit-scheme for ios, with the
+knowledge that we could compile 'emulated' ios binaries that could run in
+Mac. This might be beneficial for our effort since mit-scheme is known to
+build a temporary compiler in the first place to compile the libraries.
+
+There are questions we wish to ask:
+
+1. Whether it is possible to use libraries compiled for other platforms?
+   Or, which files are architecture-independent? To what degree can we
+   minimize the compilation task by using files compiled for other platform
+   (Mac, in this effort)?
+   
+   The result is disappointing. The mit-scheme libraries have apparently no
+   binary compatibility:
+
+Bad version in FASL File: /Users/mahmood1/src/mit-scheme-c-9.1.1/src/boot-root/lib/mit-scheme-c/all.com
+File has: version 26 architecture 17241.
+Expected: version between 10 and 12 architecture 6.
+
+----------------------------------------------------------------------------
+modified files:
+configure                        # MACOSX SDK; '-O1'
+etc/c-bundle.sh                  # gen-nonce extract-liarc-decls
+microcode/configure              # MACOSX SDK; '-O1'
+microcode/confshared.h           # MACHINE_TYPE for __arm__
+microcode/Makefile.in            # ./findprim => findprim
+microcode/makegen/Makefile.in.in # ./findprim => findprim
+----------------------------------------------------------------------------
+
+Trying to compile for iOS native
+
+Based on previous experience, I was able to compile the whole program
+smoothly after making modifications.
+
+# make a new working dir
+rm -rf mit-scheme-c-9.1.1
+tar -zxf mit-scheme-c-9.1.1.tar.gz
+# apply my patches in mit-scheme-c-9.1.1.stable
+find mit-scheme-c-9.1.1.stable -name '*.original' | sed 's:\.original$::' | while read l; do echo cp $l `echo $l | sed 's:\.stable::'`; done | sh
+./configure --enable-native-code=c --prefix=/b/ios/mit-scheme-9.1.1 --host=arm-apple-darwin10 --without-x
+env PATH=$PATH:/usr/local/lib/mit-scheme-c make
+
+We now are stuck with this portion, the LAST step of 'make':
+etc/build-bands.sh:
+run_cmd_in_dir runtime ../microcode/scheme --library ../lib --heap 6000 \
+    --fasl "${FASL}" --batch-mode <<EOF
+(begin
+  (disk-save "../lib/runtime.com")
+  (load-option (quote compiler))
+  (load-option (quote edwin))
+  (disk-save "../lib/all.com"))
+EOF
+
+In short, we will be executing:
+scheme --library ../lib --heap 6000 --fasl "http://www.gnu.org/software/mit-scheme/lib/runtime/make.so" --batch-mode
+to generate "../lib/runtime.com" and "../lib/all.com".
+
+If we use Mac scheme, we could load and generate *.com without problem. But
+the resulted binaries won't work on iOS because of the error info:
+
+Bad version in FASL File: /b/ios/mit-scheme-9.1.1/lib/mit-scheme-c/all.com
+File has: version 28 architecture 49351.
+Expected: version between 10 and 12 architecture 6.
+
+I assume that was because the .com files are targeted for mac (intel x86_64).
+If I could find a way to generate a compatible binary for armv7-ios, we are
+done.
+
+Else, if we transfer the whole working dir to ios and execute
+microcode/scheme, even a simple command '(define x 1)' generates error in:
+
+;Hardware trap SIGSEGV
+;To continue, call RESTART with an option number:
+; (RESTART 1) => Return to read-eval-print level 1.
+...
+
+If we could figure out how comes the hardware trap, we are done.
+
+I'm mildly optimistic about the test result. At least the compilation
+is thru.
+
+----------------------------------------------------------------------------
+
+Jan 15, 2011
+
+Now trying to find out the point of segmentation fault (SIGSEGV 11).
+
+We observed that at least two inputs to our ios-native scheme don't trigger
+SIGSEGV.
+
+----output from ios native scheme ----------------------------------------
+1 ]=> ()
+
+;Value: ()
+
+1 ]=> (())
+
+;The object () is not applicable.
+;To continue, call RESTART with an option number:
+; (RESTART 2) => Specify a procedure to use in its place.
+; (RESTART 1) => Return to read-eval-print level 1.
+
+1 ]=> 1
+Segmentation fault: 11
+
+----output from ios native scheme ----------------------------------------
+
+----output from mac native scheme ----------------------------------------
+1 ]=> 1
+
+;Value: 1
+
+1 ]=> (define z 1)
+
+;Value: z
+
+1 ]=> (x)
+
+;Unbound variable: x
+;To continue, call RESTART with an option number:
+; (RESTART 3) => Specify a value to use instead of x.
+; (RESTART 2) => Define x to a given value.
+; (RESTART 1) => Return to read-eval-print level 1.
+----output from mac native scheme ----------------------------------------
+We were able to identify the original of the output strings.
+
+runtime/rep.scm: ("To continue, call RESTART with an option number")
+652 (define (condition-restarts-message condition)
+653   (cmdl-message/active
+654    (lambda (port)
+655      (fresh-line port)
+656      (write-string ";To continue, call RESTART with an option number:" port)
+657      (write-restarts (filter-restarts (condition/restarts condition)) port
+658        (lambda (index port)
+659          (write-string "; (RESTART " port)
+660          (write index port)
+661          (write-string ") =>" port))))))
+
+runtime/error.scm: ("")
+1081   (set! condition-type:unbound-variable
+1082         (make-condition-type 'UNBOUND-VARIABLE condition-type:variable-error
+1083             '()
+1084           (lambda (condition port)
+1085             (write-string "Unbound variable: " port)
+1086             (write (access-condition condition 'LOCATION) port))))
+
+----------------------------------------------------------------------------
+
+I'm glad to learn that cydia already has compiled many tools, including gcc,
+gdb, awk, grep, wget, etc.
+I was able to install gdb, let it run our scheme and encounter the SIGSEGV.
+Armed with better knowledge of gdb, I'm sure I was able to find out the
+problem.
+We'd have to add '--enable-debugging' to options for configure to do this.
+
+----------------------------------------------------------------------------
+
+Success comes so unexpectedly. Compiling with '--enable-debugging' resulted
+in binaries that worked in iPad suddenly!!! After carrying out further
+experiments, I was able to find out that '-O0' or '-O1' works whereas '-O2'
+and '-O3' do not. So the likely trouble is the '-O3' option specified
+for non-debugging builds in 'configure' and 'microcode/configure'. As for
+file size:
+
+Option    size of 'mit-scheme-c'
+-O0       35M
+-O0       30M
+-O1       12M
+-O2	  12M
+-O3       12M
+
+Hence we use '-O1' in 'configure' and 'microcode/configure' now.
+
+We have to generate runtime.com and all.com on iPad. This means, when
+encountered with 'Bad CPU type' at make, we need to manually transfer the
+build dir to iPad(tar -czf, scp, tar -zxf) and run the command in runtime/:
+../microcode/scheme --library ../lib --heap 6000 --fasl "http://www.gnu.org/software/mit-scheme/lib/runtime/make.so" --batch-mode <<EOF
+(begin
+  (disk-save "../lib/runtime.com")
+  (load-option (quote compiler))
+  (disk-save "../lib/all.com"))
+EOF
+
+'(load-option (quote edwin))' is removed because it causes the following
+error:
+;Loading "edwin.bld"...
+Bad version in FASL File: /private/var/root/mit-scheme-c-9.1.1.O1/src/lib/edwin/edwin.bld
+File has: version 25 architecture 52589.
+Expected: version between 10 and 12 architecture 6.
+This may be due to the fact that edwin.bld is built using mac-native scheme.
+Since it's no more than an app, we could safely remove it from 'all.com'.
+
+----------------------------------------------------------------------------
+
+I shall thank cydia for provoding tools for unlocking my iPad and installing
+vairous unix tools, especially gdb, without which, I should not have tried
+to compile scheme as debugging build and found the problem to be '-O3'.
+
+To sum up the correct way to compile mit scheme 9.1.1 for iPad using
+mac(virtual machine)+ipad:
+1. Install Mac OS X Lion Release (11.7.2 build ) and Xcode 4.2.1.
+2. Jailbreak iPad using Cydia; install all possible gnu tools, make, openSSH, etc.
+3. install mit scheme 9.1.1 at mac.
+3. generate a customized scheme dist for ipad with my patches
+   (see 20120113-compiling-mit-scheme-ios.patches) applied.
+4. initialize xcode compiling environment; configure & make this ios-native dist.
+5. transfer the build dir to iPad.
+6. generate all.com and runtime.com in iPad.
+7. make install in mac or ipad (if you've installed make there).
+
+Now mark the problem as SOLVED!!! (20120116)

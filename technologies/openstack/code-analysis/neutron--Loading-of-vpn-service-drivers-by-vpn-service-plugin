@@ -1,0 +1,128 @@
+
+[code analysis as of commit 23037823adbbf0bfc9c6398e8d460e84d49e4e6f]
+neutron: Loading of vpn service drivers by vpn service plugin
+
+Service drivers are defined in config file as multiple service_provider entries
+in service_providers section.
+    etc/neutron.conf:453:service_provider=VPN:openswan:neutron.services.vpn.service_drivers.ipsec.IPsecVPNDriver:default
+
+When vpn service plugin is loaded by NeutronManager(), an instance is created.
+During initialization, the list of service drivers and the default one are
+loaded from service_base.load_drivers() with the instance itself specified as
+the plugin, then the default service driver is assigned to self.ipsec_driver.
+    neutron/services/vpn/plugin.py:40:class VPNDriverPlugin(VPNPlugin, vpn_db.VPNPluginRpcDbMixin):
+
+    neutron/services/vpn/plugin.py:43:    def __init__(self):
+
+    neutron/services/vpn/plugin.py:46:        drivers, default_provider = service_base.load_drivers(
+    neutron/services/vpn/plugin.py:47:            constants.VPN, self)
+
+    neutron/services/vpn/plugin.py:49:        self.ipsec_driver = drivers[default_provider]
+
+    neutron/services/vpn/plugin.py:51:    def _get_driver_for_vpnservice(self, vpnservice):
+    neutron/services/vpn/plugin.py:52:        return self.ipsec_driver
+
+load_drivers() use sdb.ServiceTypeManager to load the service providers.
+    neutron/services/service_base.py:60:def load_drivers(service_type, plugin):
+    neutron/services/service_base.py:61:    """Loads drivers for specific service.
+    neutron/services/service_base.py:62:
+    neutron/services/service_base.py:63:    Passes plugin instance to driver's constructor
+    neutron/services/service_base.py:64:    """
+    neutron/services/service_base.py:65:    service_type_manager = sdb.ServiceTypeManager.get_instance()
+    neutron/services/service_base.py:66:    providers = (service_type_manager.
+    neutron/services/service_base.py:67:                 get_service_providers(
+    neutron/services/service_base.py:68:                     None,
+    neutron/services/service_base.py:69:                     filters={'service_type': [service_type]})
+    neutron/services/service_base.py:70:                 )
+
+    neutron/services/service_base.py:76:
+    neutron/services/service_base.py:77:    drivers = {}
+    neutron/services/service_base.py:78:    for provider in providers:
+    neutron/services/service_base.py:79:        try:
+    neutron/services/service_base.py:80:            drivers[provider['name']] = importutils.import_object(
+    neutron/services/service_base.py:81:                provider['driver'], plugin
+    neutron/services/service_base.py:82:            )
+    
+    neutron/services/service_base.py:93:
+    neutron/services/service_base.py:94:    default_provider = None
+    neutron/services/service_base.py:95:    try:
+    neutron/services/service_base.py:96:        provider = service_type_manager.get_default_service_provider(
+    neutron/services/service_base.py:97:            None, service_type)
+    neutron/services/service_base.py:98:        default_provider = provider['name']
+
+    neutron/services/service_base.py:103:    return drivers, default_provider
+
+Class ServiceTypeManager is defined as service providers interface from db,
+based on method parse_service_provider_opt() and class ProviderConfiguration()
+from neutron/services/provider_configuration.py.
+Its two main methods are:
+1) get_service_providers: forwarded to
+   ProviderConfiguration.get_service_providers().
+2) get_default_service_provider: implemented here in terms of
+   ProviderConfiguration.get_service_providers().
+    neutron/db/servicetype_db.py:39:class ServiceTypeManager(object):
+
+    neutron/db/servicetype_db.py:50:    def __init__(self):
+    neutron/db/servicetype_db.py:51:        self._initialize_db()
+    neutron/db/servicetype_db.py:52:        self._load_conf()
+
+    neutron/db/servicetype_db.py:58:    def _load_conf(self):
+    neutron/db/servicetype_db.py:59:        self.conf = pconf.ProviderConfiguration(
+    neutron/db/servicetype_db.py:60:            pconf.parse_service_provider_opt())
+
+    neutron/db/servicetype_db.py:62:    def get_service_providers(self, context, filters=None, fields=None):
+    neutron/db/servicetype_db.py:63:        return self.conf.get_service_providers(filters, fields)
+    neutron/db/servicetype_db.py:64:
+    neutron/db/servicetype_db.py:65:    def get_default_service_provider(self, context, service_type):
+    neutron/db/servicetype_db.py:66:        """Return the default provider for a given service type."""
+    neutron/db/servicetype_db.py:67:        filters = {'service_type': [service_type],
+    neutron/db/servicetype_db.py:68:                   'default': [True]}
+    neutron/db/servicetype_db.py:69:        providers = self.get_service_providers(context, filters=filters)
+    neutron/db/servicetype_db.py:70:        # By construction we expect at most a single item in provider
+    neutron/db/servicetype_db.py:71:        if not providers:
+    neutron/db/servicetype_db.py:72:            raise pconf.DefaultServiceProviderNotFound(
+    neutron/db/servicetype_db.py:73:                service_type=service_type
+    neutron/db/servicetype_db.py:74:            )
+    neutron/db/servicetype_db.py:75:        return providers[0]
+
+doer 1): parse service providers from config file and return as dict.
+    neutron/services/provider_configuration.py:41:def parse_service_provider_opt():
+
+    neutron/services/provider_configuration.py:48:    svc_providers_opt = cfg.CONF.service_providers.service_provider
+
+    neutron/services/provider_configuration.py:75:        res.append({'service_type': svc_type,
+    neutron/services/provider_configuration.py:76:                    'name': name,
+    neutron/services/provider_configuration.py:77:                    'driver': driver,
+    neutron/services/provider_configuration.py:78:                    'default': default})
+    neutron/services/provider_configuration.py:79:    return res
+
+doer 2): upon init, read service providers data from dict, verify uniqueness.
+    neutron/services/provider_configuration.py:97:class ProviderConfiguration(object):
+    neutron/services/provider_configuration.py:98:    def __init__(self, prov_data):
+    neutron/services/provider_configuration.py:99:        self.providers = {}
+    neutron/services/provider_configuration.py:100:        for prov in prov_data:
+    neutron/services/provider_configuration.py:101:            self.add_provider(prov)
+
+    neutron/services/provider_configuration.py:121:    def add_provider(self, provider):
+    neutron/services/provider_configuration.py:122:        self._ensure_driver_unique(provider['driver'])
+    neutron/services/provider_configuration.py:123:        self._ensure_default_unique(provider['service_type'],
+    neutron/services/provider_configuration.py:124:                                    provider['default'])
+    neutron/services/provider_configuration.py:125:        provider_type = (provider['service_type'], provider['name'])
+    neutron/services/provider_configuration.py:126:        if provider_type in self.providers:
+    neutron/services/provider_configuration.py:127:            msg = (_("Multiple providers specified for service "
+    neutron/services/provider_configuration.py:128:                     "%s") % provider['service_type'])
+    neutron/services/provider_configuration.py:129:            LOG.exception(msg)
+    neutron/services/provider_configuration.py:130:            raise n_exc.Invalid(msg)
+    neutron/services/provider_configuration.py:131:        self.providers[provider_type] = {'driver': provider['driver'],
+    neutron/services/provider_configuration.py:132:                                         'default': provider['default']}
+
+doer 3): service providers interface.
+    neutron/services/provider_configuration.py:155:    def get_service_providers(self, filters=None, fields=None):
+    neutron/services/provider_configuration.py:156:        return [self._fields({'service_type': k[0],
+    neutron/services/provider_configuration.py:157:                              'name': k[1],
+    neutron/services/provider_configuration.py:158:                              'driver': v['driver'],
+    neutron/services/provider_configuration.py:159:                              'default': v['default']},
+    neutron/services/provider_configuration.py:160:                             fields)
+    neutron/services/provider_configuration.py:161:                for k, v in self.providers.items()
+    neutron/services/provider_configuration.py:162:                if self._check_entry(k, v, filters)]
+

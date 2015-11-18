@@ -1,0 +1,14 @@
+# bootstrapping the local scripts; ~/bashrc-local-sudo and ~/bashrc-local
+# shall be executed in that order as the latter is dependent on the former.
+# cat >> ~/bash_profile
+
+echo Executing sudo bash ~/bashrc-local-sudo if it exists ...
+if [ -f ~/bashrc-local-sudo ] ; then
+  sudo bash ~/bashrc-local-sudo
+fi
+
+echo Executing source ~/bashrc-local if it exists ...
+if [ -f ~/bashrc-local ] ; then
+  source ~/bashrc-local
+fi
+

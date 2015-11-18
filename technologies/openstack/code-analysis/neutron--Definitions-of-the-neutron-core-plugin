@@ -1,0 +1,53 @@
+
+How are neutron core plugin related data structures are defined?
+
+Definition of the neutron plugin api:
+All combinations of the basic operations and basic elements:
+{create, get, update, delete} x {subnet, port, network}
+    neutron/neutron_plugin_base_v2.py:17:v2 Neutron Plug-in API specification.
+    neutron/neutron_plugin_base_v2.py:18:
+    neutron/neutron_plugin_base_v2.py:19::class:`NeutronPluginBaseV2` provides the definition of minimum set of
+    neutron/neutron_plugin_base_v2.py:20:methods that needs to be implemented by a v2 Neutron Plug-in.
+    neutron/neutron_plugin_base_v2.py:21:"""
+    neutron/neutron_plugin_base_v2.py:22:
+    neutron/neutron_plugin_base_v2.py:23:import abc
+    neutron/neutron_plugin_base_v2.py:24:import six
+    neutron/neutron_plugin_base_v2.py:25:
+    neutron/neutron_plugin_base_v2.py:26:
+    neutron/neutron_plugin_base_v2.py:27:@six.add_metaclass(abc.ABCMeta)
+    neutron/neutron_plugin_base_v2.py:28:class NeutronPluginBaseV2(object):
+    neutron/neutron_plugin_base_v2.py:29:
+    neutron/neutron_plugin_base_v2.py:30:    @abc.abstractmethod
+    neutron/neutron_plugin_base_v2.py:31:    def create_subnet(self, context, subnet):
+    neutron/neutron_plugin_base_v2.py:32:        """Create a subnet.
+
+The port data structure is accessed via port['port'].
+    neutron/neutron_plugin_base_v2.py:246:    @abc.abstractmethod
+    neutron/neutron_plugin_base_v2.py:247:    def update_port(self, context, id, port):
+    neutron/neutron_plugin_base_v2.py:248:        """Update values of a port.
+    neutron/neutron_plugin_base_v2.py:249:
+    neutron/neutron_plugin_base_v2.py:250:        :param context: neutron api request context
+    neutron/neutron_plugin_base_v2.py:251:        :param id: UUID representing the port to update.
+    neutron/neutron_plugin_base_v2.py:252:        :param port: dictionary with keys indicating fields to update.
+    neutron/neutron_plugin_base_v2.py:253:                     valid keys are those that have a value of True for
+    neutron/neutron_plugin_base_v2.py:254:                     'allow_put' as listed in the :obj:`RESOURCE_ATTRIBUTE_MAP`
+    neutron/neutron_plugin_base_v2.py:255:                     object in :file:`neutron/api/v2/attributes.py`.
+
+neutron plugin api implementation from db (based on sqlalchemy).
+This is the base class for all plugins; for example, see definition of the ml2
+plugin.
+    neutron/db/db_base_plugin_v2.py:209:class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
+    neutron/db/db_base_plugin_v2.py:210:                        CommonDbMixin):
+    neutron/db/db_base_plugin_v2.py:211:    """V2 Neutron plugin interface implementation using SQLAlchemy models.
+
+Here comes the implementation of the various abstract methods.
+neutron/db/db_base_plugin_v2.py:1391:    def update_port(self, context, id, port):
+neutron/db/db_base_plugin_v2.py:1392:        p = port['port']
+
+neutron/plugins/ml2/plugin.py:65:class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
+neutron/plugins/ml2/plugin.py:66:                external_net_db.External_net_db_mixin,
+neutron/plugins/ml2/plugin.py:67:                sg_db_rpc.SecurityGroupServerRpcMixin,
+neutron/plugins/ml2/plugin.py:68:                agentschedulers_db.DhcpAgentSchedulerDbMixin,
+neutron/plugins/ml2/plugin.py:69:                addr_pair_db.AllowedAddressPairsMixin,
+neutron/plugins/ml2/plugin.py:70:                extradhcpopt_db.ExtraDhcpOptMixin):
+

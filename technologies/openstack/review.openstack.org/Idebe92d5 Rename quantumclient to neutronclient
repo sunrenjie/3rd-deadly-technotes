@@ -1,0 +1,31 @@
+Idebe92d5: Rename quantumclient to neutronclient
+
+Rename quantumclient to neutronclient
+
+Implements Blueprint: remove-use-of-quantum
+
+Change-Id: Idebe92d56d277435ffd23f292984f9b8b8fdb2df
+
+We comment on this change only because it is a perfect counterexample of bad
+commits.
+
+The main purpose of this commit is to reflect the change of the openstack
+networking component from 'quantum' to 'neutron'. But this and this commit
+'Change I54b6912e: Add name or id to quantum cli commands. Bug #1030180'
+together make the file 'quantum_test.sh' nearly rubbish. For convenience, we
+will quote this change only here, though actually the problems are rooted in
+change 'I54b6912e'.
+
+1. The purpose, design, or implementation of 'neutron_test.sh' is not obvious
+   either from file name or from documentation (there is none), or inline
+   comments (there is rare). The code is in ad hoc mode ever since it was born.
+2. The code is incorrect. The 'cidr' of '10.0.1.0/24' is invalid. The option
+   '--dns-nameservers' is misspelled as '--dns_namesevers'. All these stuff were
+   from 'Change I54b6912e' and are inheriented by this change.
+3. Both these changes are tested OK and accepted simply because functionality of
+   this script is not covered by the automated test: not used for testing and
+   not subject to testing.
+
+Finally, the most rediculous part about this silly story is that the whole
+world saw it, yet ignored.
+

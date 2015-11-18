@@ -1,0 +1,38 @@
+
+Ensuring consistency in reading large data structures by means of signiture
+
+Lab6 has a example of reading 64-bit integer in 32-bit machine:
+
+	// Copy 64-bit counter src into dst, being careful about read races.
+	struct split64 {
+		// assumes little-endian memory
+		uint lo;
+		uint hi;
+	};
+	void
+	readcounter(uint64 *src64, uint64 *dst64)
+	{
+		struct split64 *src;
+		struct split64 *dst;
+
+		src = (struct split64*)src64;
+		dst = (struct split64*)dst64;
+
+     		do {
+			dst->hi = src->hi;	// read high bits
+			dst->lo = src->lo;	// read low bits
+		} while (dst->hi != src->hi);	// do over if high bits changed
+	}
+
+The higher bits are taken to be the 'signiture' of the whole 64-bit integer. If
+the signiture changes before and after the read, the read is performed again.
+This idea can be generalized to a method of ensuring data consistency in read
+by means of signiture or checksum.
+
+The selection of signiture is a tradeoff between performance and degree of
+protection. The higher bits in the example is easy to compute, yet it cannot
+protect the whole data structure: the lower bits may change. But that is OK,
+as old and new values are both accepted. If, on the other hand, the integrity
+of the whole data is needed, an expensive covering-whole-data checksum may have
+to be calculated.
+

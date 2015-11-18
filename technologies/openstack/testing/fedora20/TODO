@@ -1,0 +1,5 @@
+
+TODOs
+
+1. We do not need to prepare all source repos in /opt/stack for compute nodes.
+Some optimization is allowed here.

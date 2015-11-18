@@ -1,0 +1,5 @@
+
+gcc related topics created @ 20120519
+
+1. Use the gcc option '-Wall' to catch potential problems in source code.
+

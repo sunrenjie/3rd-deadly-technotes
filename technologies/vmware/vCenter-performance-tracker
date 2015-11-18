@@ -1,0 +1,96 @@
+vCenter performance tracker (vCPT)
+
+20141223
+
+vCPT: a reliable, quantitive vCenter performance tracker.
+
+=====================
+Implementation status
+
+[bp1]
+1. Collect all possible historical data.
+
+===========
+Definitions
+
+Roles:
+1. Collect and store historical and real-time performance data reliably and
+   permanantly.
+   vCenter only only store real-time performance data for the last hour.
+   Some critical performance data, say per-vmnic throughput, is only available
+   as real-time data.
+   
+   The difference is in anology to TCP vs. UDP.
+2. Really reliable performance tracking. vCenter server performance module
+   offers a best-effort functionality. In fact, even vCenter server itself is
+   allowed to be down while the data center continues to work.
+3. Flexible and really user-defined performance reporting. vCPT is designed
+   to quantify the painpoints of your really highly professional and
+   sophisticated vCenter management. The engineers are heavy vCenter users.
+   They know that to pinpoint the obsecure reason behind a wierd problem, we
+   really need a solution more than generic. EXCELs, graphs, etc? Not enough.
+   Actually, an perfect combination of all that we could imagine.
+   In contrast, vCenter only allow charts.
+   vCOPS is essentially a high level monitor; not quantitive.
+   vCOPS supports csv export, but no customization. And vCOPS license fee is really high.
+
+Modules:
+1. Data collector daemon.
+2. Data storage engine.
+3. Data access API.
+4. Performance analyzers (API consumers).
+
+==============================
+vCenter knowledge that matters
+
+From the performance point of view, the most commonly accessed inventory is
+'Hosts and Clusters'.
++ vCenter node
+  + Data center 1
+    + Cluster 1
+    + Cluster 2
+      + Hosts
+        + Host 1
+        + Host 2
+        + ...
+      + Resource pool (unamed; root)
+        + VM1
+        + VM2
+        + ...
+        + Resource pool sub1
+          + VMx
+          + VMy
+        + Resource pool sub2
+        + ...
+    + ...
+  + Data center 2
+  + ...
+
+There are two types of vCenter performance data: historical and real time.
+
+Historical data is whatever vCenter knows about in the history. It contains
+data points as old as a year ago, as long as vCenter has run such a long time
+and has been allowed to store them all along.
+
+Real-time data is what vCenter collects very recently (normally the last hour).
+
+In order not to present too high a burden for vCenter server, historical data
+is collected typically at every day or every week (or several days, as
+appropriate in the vCenter environment).
+
+=====================
+Data collector daemon
+
+Definition for data:
+1. vCenter performance data (available in the 'Performance' tab).
+2. All meaningful configuration, status, events, changes, etc.
+   vCenter performance Data collected shall only be meaningful together with
+   these data. [XXX: please elaborate on this based on realistic scenaros.
+
+vCenter historical and real-time data are collected in different manners.
+
+Real-time data is expensive; choose this version only for good reasons.
+1. Data is real-time only. For example, per-vmnic RX/TX data.
+2. Real-time version is superior.
+
+

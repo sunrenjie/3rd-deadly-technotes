@@ -1,0 +1,1 @@
+../bashrc.available/50-add-func-wine-apps.sh

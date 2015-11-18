@@ -1,0 +1,148 @@
+
+20120315
+Now we formally work on utouch on ubuntu.
+
+We wish to modifiy the utouch stack to suit our purpose well. The effort is
+considered successful if:
++ Our program (written in C++, Qt, or whatever language) can accurately and
+  reliably receive touch events modularly.
++ The interface is trivial to use.
++ Gesture recognition and responses 'resembles' those found in Apple touch
+  devices like iPhone and iPad.
+
+The good news are that:
++ The utouch stack is working:
+  + The touch signals are detected with accuracy.
+  + With the help of utouch-qml, utouch is already usable in Qt.
+
+The bad news are that:
++ The gesture is somehow contrary to our expectations based on familarity with
+  Apple touch devices, which means that the gesture detection logic has to be
+  located and modified.
+
+Our work is based on utouch, which implies that we shall keep an eye on
+activities in the Ubuntu community, new releases, technotes, etc.
+
+--------------------------------------------------------------------------------
+Now for the details
+20120315
+
+Q1. Which module is responsible for touch events receiving, processing, and then
+    gesture detection?
+
+I guess package dependency info helps.
+
+First of all, list all utouch packages.
+$ dpkg -l | grep utouch
+ii  libutouch-evemu1                       1.0.5-0ubuntu1                          Kernel Device Emulation Library
+ii  libutouch-frame-dev                    1.1.4-0ubuntu1                          Touch Frame Library - dev files
+ii  libutouch-frame1                       1.1.4-0ubuntu1                          Touch Frame Library
+ii  libutouch-geis-dev                     2.1.2-0ubuntu4                          Gesture engine interface support - dev files
+ii  libutouch-geis-doc                     2.1.2-0ubuntu4                          Gesture engine interface support - documentation
+ii  libutouch-geis1                        2.1.2-0ubuntu4                          Gesture engine interface support
+ii  libutouch-grail-dev                    2.0.1-0ubuntu1                          Gesture Recognition And Instantiation Library - dev files
+ii  libutouch-grail1                       2.0.1-0ubuntu1                          Gesture Recognition And Instantiation Library
+ii  libutouch-qml                          1.0.4-0ubuntu1                          QML plugin for the uTouch gesture framework
+ii  libutouch-qml-doc                      1.0.4-0ubuntu1                          QML plugin for the uTouch gesture framework - documentation
+ii  python-utouch-geis                     2.1.2-0ubuntu4                          python bindings for libutouch-geis
+ii  utouch                                 1.1                                     A meta-package to install gesture libraries and tools
+ii  utouch-geis-tools                      2.1.2-0ubuntu4                          Gesture engine interface support - test tools
+ii  utouch-gesturetest                     1.0.5-0ubuntu1                          Test tool for the X Gesture extension
+ii  utouch-grail-tools                     2.0.1-0ubuntu1                          Gesture Recognition And Instantiation Library - test tools
+
+Next, display all dependencies of libutouch-qml:
+libutouch-qml -> libutouch-geis1 -> libutouch-grail1
+libutouch-grail1 -> libmtdev1 libutouch-evemu1 libutouch-frame1
+libutouch-frame1 -> libutouch-evemu1
+
+Also:
+ii  libmtdev1                              1.1.0-2ubuntu1                          Multitouch Protocol Translation Library - shared library
+
+From /usr/share/doc/libutouch-evemu1/README:
+The evemu library and tools are used to describe devices, record
+data, create devices and replay data from kernel evdev devices.
+
+From /usr/share/doc/libmtdev1/README:
+mtdev - Multitouch Protocol Translation Library (MIT license)
+The mtdev library transforms all variants of kernel MT events to the
+slotted type B protocol. The events put into mtdev may be from any MT
+device, specifically type A without contact tracking, type A with
+contact tracking, or type B with contact tracking. See the kernel
+documentation for further details.
+
+From /usr/share/doc/libutouch-grail1/README:
+grail - Gesture Recognition And Instantiation Library
+This tree consists of an interface and tools for handling gesture
+recognition and gesture instantiation.
+When a multitouch gesture is performed on a device, the recognizer
+emits one or several possible gestures. Once the context of the
+gesture is known, i.e., in what window the touches land and what
+gestures the clients of that window listens to, the instantiator
+delivers the matching set of gestures.
+The library handles tentative getures, i.e., buffering of events for
+several alternative gestures until a match is confirmed.
+
+We could guess that
+1. The general dependency is: utouch -> geis -> grail -> frame.
+2. The gesture recognition functionality resides in grail.
+
+20120316
+
+I thought it might do good to have latest versions of the software stack. Get
+source code for the packages from https://launchpad.net/canonical-multitouch
+to /t/a/incoming/ubuntu-src-current/. We will install the packages to
+/t/a/incoming/ubuntu-src-current/o
+install utouch-frame-2.2.1:
+./configure --prefix=/t/a/incoming/ubuntu-src-current/o
+install utouch-grail-3.0.2:
+(We could rely on the packages mtdev/evemu released with the OS (11.10), but
+utouch-frame 2.2 must be installed manually. Using 'ldd' after installation
+displays such info well.)
+env PKG_CONFIG_PATH=/t/a/incoming/ubuntu-src-current/o/lib/pkgconfig/ ./configure --prefix=/t/a/incoming/ubuntu-src-current/o
+
+But we could not easily get utouch-geis-2.2.6 and utouch-qml-1.0.5 to work.
+Maybe we want to learn how to systematically learn the way to compile a package
+in ubuntu way. Obviously, when a package is released by its author, there's no
+reason the package shall be This knowledge is useful in developing our own
+application. For the time being, this might be off the topic. Working on newer
+version makes me exposed to uncertainties originated from unfamilarity with
+GNU compiling system, debian/ubuntu compiling system. We could simply now work
+on old, yet working code released with the OS and only resort to newer versions
+with good reasons (i.e., on dissatisfaction).
+
+There are 4 options for us:
++ Ubuntu 11.10 + accompanying utouch stack
++ Ubuntu 11.10 + new utouch stack targeted at Ubuntu 12.04
++ Ubuntu 11.10 + new utouch stack as released at launchpad
++ Ubuntu 12.04 + accompanying utouch stack
+
+The 2nd option is probabily the best, as
++ it's newer compared to 1st one.
++ it's likely to require less effort to compile than for the 3rd one.
++ the system is likely to be more stable compared to 4th one, as the ubuntu
+  12.04 is still in beta1.
+But, sadly, the requirement
+debhelper (>= 9) libutouch-frame-dev (>= 2.2.0) x11proto-input-dev (>= 2.1.99.5)
+is such forbidding. We might want to try ubuntu 12.04 beta1 instead for newer
+version of the utouch stack.
+
+And now we will bend ourselves on the C code at:
+/t/a/incoming/ubuntu-src-release-11.10/utouch-grail-2.0.1
+
+Q2. How should we understand open source code and make changes as needed without
+spending too much time on irrelevent info?
+
+I think we should try to understand the way the software is written as much as
+possible within limited time. Layers considered:
++ The GNU compiling system
++ The debian/ubuntu compiling system
++ The launchpad, on which the code is hosted
++ Any documentation
++ The code itself
+
+Now create a dedicated log for grail: 20120315_ubuntu.utouch.grail
+
+20120319
+Now create a dedicated log for 'dirty' details from the code itself:
+20120319_ubuntu.utouch.dirty
+

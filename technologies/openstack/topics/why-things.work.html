@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style type="text/css">
+<!--
+pre { font-family: monospace; color: #000000; background-color: #ffffff; }
+body { font-family: 'lucida grande'; font-size:12px; color: #000000; background-color: #ffffff; }
+.lnr { color: #af5f00; }
+.PreProc { color: #c000c0; }
+.Type { color: #008000; }
+.Special { color: #c000c0; }
+.Constant { color: #c00000; }
+.Identifier { color: #008080; }
+.Statement { color: #af5f00; }
+.comment {
+  font-weight: bold;
+  background: #00FF00;
+}
+.defect {
+  font-weight: bold;
+  background: #FF00FF;
+}
+.todo {
+  font-weight: bold;
+  background: #FFFF00;
+}
+.todo_done {
+  font-weight: bold;
+  background: #FFFFEE;
+  text-decoration: line-through;
+}
+
+-->
+</style>
+
+</head>
+<body>
+<h3>Why things work?</h3>
+<pre>
+[r@f20-control ~]$ ping 172.24.4.6
+PING 172.24.4.6 (172.24.4.6) 56(84) bytes of data.
+64 bytes from 172.24.4.6: icmp_seq=1 ttl=63 time=43.1 ms
+64 bytes from 172.24.4.6: icmp_seq=2 ttl=63 time=1.15 ms
+64 bytes from 172.24.4.6: icmp_seq=3 ttl=63 time=1.01 ms
+
+[r@f20-control ~]$ ip neigh
+192.168.0.1 dev ens7 lladdr 78:e7:d1:93:91:30 REACHABLE
+172.24.4.3 dev br-ex lladdr fa:16:3e:9c:f7:c7 STALE
+172.24.4.7 dev br-ex lladdr fa:16:3e:9c:f7:c7 STALE
+192.168.0.116 dev ens7 lladdr 52:54:00:fd:cf:eb REACHABLE
+192.168.1.104 dev ens3 lladdr 78:e7:d1:93:91:2e STALE
+172.24.4.2 dev br-ex lladdr fa:16:3e:9c:f7:c7 STALE
+172.24.4.6 dev br-ex lladdr fa:16:3e:9c:f7:c7 REACHABLE
+***
+Notes:
+1. entries for floating range 172.24.4.x/24 will be fa:16:3e:9c:f7:c7,
+   qg-eb2d1bc3-78 from qrouter-4dac10b3-3fc5-4312-8f5c-e8e019363ac0,
+   who is actual holder of the various floating IPs.
+
+[r@f20-control ~]$ neutron port-list
++--------------------------------------+------+-------------------+-----------------------------------------------------------------------------------+
+| id                                   | name | mac_address       | fixed_ips                                                                         |
++--------------------------------------+------+-------------------+-----------------------------------------------------------------------------------+
+| 17cafc82-c376-429e-8834-ba47937d7b11 |      | fa:16:3e:f3:c8:1e | {"subnet_id": "74e40d00-8018-469e-b567-8e7da46e5bb5", "ip_address": "10.0.0.3"}   |
+| 1c4a13db-6632-4c0d-9c75-764b71fac1c4 |      | fa:16:3e:8f:9a:c4 | {"subnet_id": "74e40d00-8018-469e-b567-8e7da46e5bb5", "ip_address": "10.0.0.6"}   |
+| 43abcc69-0626-444e-97e3-f79563473705 |      | fa:16:3e:4b:d1:3e | {"subnet_id": "b05070f4-abd4-47cd-b322-47b9936238a4", "ip_address": "172.24.4.6"} |
+| 5b89b671-513d-4bc0-ab21-72b448b9869f |      | fa:16:3e:e2:35:45 | {"subnet_id": "b05070f4-abd4-47cd-b322-47b9936238a4", "ip_address": "172.24.4.7"} |
+| 8243d4de-0b09-4bcf-864c-c8f237f77b35 |      | fa:16:3e:1f:c4:27 | {"subnet_id": "74e40d00-8018-469e-b567-8e7da46e5bb5", "ip_address": "10.0.0.2"}   |
+| 85d3b9db-94d1-451b-8507-fc12599b9fdf |      | fa:16:3e:0d:f1:d6 | {"subnet_id": "74e40d00-8018-469e-b567-8e7da46e5bb5", "ip_address": "10.0.0.4"}   |
+| 8e33da4b-b1ca-4fc4-b759-8e13d39f1db4 |      | fa:16:3e:1f:31:68 | {"subnet_id": "74e40d00-8018-469e-b567-8e7da46e5bb5", "ip_address": "10.0.0.5"}   |
+| a941ca7d-f94d-4997-9899-1905331ae6a9 |      | fa:16:3e:05:f0:17 | {"subnet_id": "b05070f4-abd4-47cd-b322-47b9936238a4", "ip_address": "172.24.4.5"} |
+| b5031419-e617-4688-b20e-3d7527b5592e |      | fa:16:3e:4c:d9:8b | {"subnet_id": "b05070f4-abd4-47cd-b322-47b9936238a4", "ip_address": "172.24.4.3"} |
+| cbda10d1-8646-4a23-9d17-ffb5e692a665 |      | fa:16:3e:76:02:a0 | {"subnet_id": "74e40d00-8018-469e-b567-8e7da46e5bb5", "ip_address": "10.0.0.1"}   |
+| eb2d1bc3-78de-40cc-8135-a04de10cdfb2 |      | fa:16:3e:9c:f7:c7 | {"subnet_id": "b05070f4-abd4-47cd-b322-47b9936238a4", "ip_address": "172.24.4.2"} |
++--------------------------------------+------+-------------------+-----------------------------------------------------------------------------------+
+
+==============
+APPENDIX. namespaces and configurations
+
+$ for n in $(sudo ip netns list); do echo $n; sudo ip netns exec $n ip a; done
+qrouter-4dac10b3-3fc5-4312-8f5c-e8e019363ac0
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+7: qr-cbda10d1-86: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default 
+    link/ether fa:16:3e:76:02:a0 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.1/24 brd 10.0.0.255 scope global qr-cbda10d1-86
+       valid_lft forever preferred_lft forever
+    inet6 fe80::f816:3eff:fe76:2a0/64 scope link 
+       valid_lft forever preferred_lft forever
+21: qg-eb2d1bc3-78: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default 
+    link/ether fa:16:3e:9c:f7:c7 brd ff:ff:ff:ff:ff:ff
+    inet <a class="comment" title="SNAT source IP for traffic of those VMs without dedicated floating IP">172.24.4.2/24</a> brd 172.24.4.255 scope global qg-eb2d1bc3-78
+       valid_lft forever preferred_lft forever
+    inet 172.24.4.5/32 brd 172.24.4.5 scope global qg-eb2d1bc3-78
+       valid_lft forever preferred_lft forever
+    inet 172.24.4.7/32 brd 172.24.4.7 scope global qg-eb2d1bc3-78
+       valid_lft forever preferred_lft forever
+    inet 172.24.4.3/32 brd 172.24.4.3 scope global qg-eb2d1bc3-78
+       valid_lft forever preferred_lft forever
+    inet 172.24.4.6/32 brd 172.24.4.6 scope global qg-eb2d1bc3-78
+       valid_lft forever preferred_lft forever
+    inet6 fe80::f816:3eff:fe9c:f7c7/64 scope link 
+       valid_lft forever preferred_lft forever
+qdhcp-a94e65df-c1af-45a9-afb4-d07afa08cf3a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+9: tap8243d4de-0b: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN group default 
+    link/ether fa:16:3e:1f:c4:27 brd ff:ff:ff:ff:ff:ff
+    inet 10.0.0.2/24 brd 10.0.0.255 scope global tap8243d4de-0b
+       valid_lft forever preferred_lft forever
+    inet6 fe80::f816:3eff:fe1f:c427/64 scope link 
+       valid_lft forever preferred_lft forever
+
+================
+APPENDIX. iptables configuration in the namespace qrouter-4dac10b3-3fc5-4312-8f5c-e8e019363ac0
+$ for table in filter nat mangle raw security; do echo $table; sudo ip netns exec qrouter-4dac10b3-3fc5-4312-8f5c-e8e019363ac0 iptables -t $table -S ;done
+
+table\chain  PREROUTING   INPUT    FORWARD    OUTPUT   POSTROUTING
+filter                    *(3)     *          *
+nat          *(2)         *                   *(4)     *(5)
+mangle       *            *        *          *        *
+raw          *(1)                             *
+security                  *        *          *
+
+(1) disable connection tracking
+(2) DNAT from floating IP to internal IP
+(3) intercept and accept input to port 9697
+(4) DNAT from floating IP to internal IP (same as 2)
+(5) SNAT from internal IP to floating IP
+
+filter
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+-N neutron-filter-top
+-N neutron-vpn-agen-FORWARD
+-N neutron-vpn-agen-INPUT
+-N neutron-vpn-agen-OUTPUT
+-N neutron-vpn-agen-local
+-A INPUT -j neutron-vpn-agen-INPUT
+-A FORWARD -j neutron-filter-top
+-A FORWARD -j neutron-vpn-agen-FORWARD
+-A OUTPUT -j neutron-filter-top
+-A OUTPUT -j neutron-vpn-agen-OUTPUT
+-A neutron-filter-top -j neutron-vpn-agen-local
+<a class="comment" title="Essentially matching and accepting (metadata) traffic translated from 169.254.169.254:80 via a DNAT rule in dnat PREROUTING">-A neutron-vpn-agen-INPUT -d 127.0.0.1/32 -p tcp -m tcp --dport 9697 -j ACCEPT</a>
+nat
+-P PREROUTING ACCEPT
+-P INPUT ACCEPT
+-P OUTPUT ACCEPT
+-P POSTROUTING ACCEPT
+-N neutron-postrouting-bottom
+-N neutron-vpn-agen-OUTPUT
+-N neutron-vpn-agen-POSTROUTING
+-N neutron-vpn-agen-PREROUTING
+-N neutron-vpn-agen-float-snat
+-N neutron-vpn-agen-snat
+-A PREROUTING -j neutron-vpn-agen-PREROUTING
+-A OUTPUT -j neutron-vpn-agen-OUTPUT
+-A POSTROUTING -j neutron-vpn-agen-POSTROUTING
+-A POSTROUTING -j neutron-postrouting-bottom
+-A neutron-postrouting-bottom -j neutron-vpn-agen-snat
+-A neutron-vpn-agen-OUTPUT -d 172.24.4.5/32 -j DNAT --to-destination 10.0.0.4
+-A neutron-vpn-agen-OUTPUT -d 172.24.4.7/32 -j DNAT --to-destination 10.0.0.6
+-A neutron-vpn-agen-OUTPUT -d 172.24.4.3/32 -j DNAT --to-destination 10.0.0.3
+-A neutron-vpn-agen-OUTPUT -d 172.24.4.6/32 -j DNAT --to-destination 10.0.0.5
+<a class="comment" title="Literally, this rule matches and accepts subnet internal (not from/to qg-xxx), non-DNAT traffic, so that they don't slip down and subject to the SNAT rules.">-A neutron-vpn-agen-POSTROUTING ! -i qg-eb2d1bc3-78 ! -o qg-eb2d1bc3-78 -m conntrack ! --ctstate DNAT -j ACCEPT</a>
+<a class="comment" title="Just another format of DNAT">-A neutron-vpn-agen-PREROUTING -d 169.254.169.254/32 -p tcp -m tcp --dport 80 -j REDIRECT --to-ports 9697</a>
+-A neutron-vpn-agen-PREROUTING -d 172.24.4.5/32 -j DNAT --to-destination 10.0.0.4
+-A neutron-vpn-agen-PREROUTING -d 172.24.4.7/32 -j DNAT --to-destination 10.0.0.6
+-A neutron-vpn-agen-PREROUTING -d 172.24.4.3/32 -j DNAT --to-destination 10.0.0.3
+-A neutron-vpn-agen-PREROUTING -d 172.24.4.6/32 -j DNAT --to-destination 10.0.0.5
+-A neutron-vpn-agen-float-snat -s 10.0.0.4/32 -j SNAT --to-source 172.24.4.5
+-A neutron-vpn-agen-float-snat -s 10.0.0.6/32 -j SNAT --to-source 172.24.4.7
+-A neutron-vpn-agen-float-snat -s 10.0.0.3/32 -j SNAT --to-source 172.24.4.3
+-A neutron-vpn-agen-float-snat -s 10.0.0.5/32 -j SNAT --to-source 172.24.4.6
+-A neutron-vpn-agen-snat -j neutron-vpn-agen-float-snat
+<a class="comment" title="All other outbound SNAT traffic without dedicated floating IP uses the common one">-A neutron-vpn-agen-snat -s 10.0.0.0/24 -j SNAT --to-source 172.24.4.2</a>
+mangle
+-P PREROUTING ACCEPT
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+-P POSTROUTING ACCEPT
+raw
+-P PREROUTING ACCEPT
+-P OUTPUT ACCEPT
+security
+-P INPUT ACCEPT
+-P FORWARD ACCEPT
+-P OUTPUT ACCEPT
+</pre>
+</body>
+</html>

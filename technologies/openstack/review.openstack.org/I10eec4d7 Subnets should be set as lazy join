@@ -1,0 +1,62 @@
+Change I10eec4d7: Subnets should be set as lazy='join'
+
+https://review.openstack.org/#/c/83213/
+
+Subnets should be set as lazy='join'
+
+Currently if one does a net-list tons of queries are issued against the
+database as the default query mode is 'select' which performs a query when
+the field is actually accessed. In this patch I change the the mode to
+'joined' so subnets are loaded as the networks are loaded. Usually, there
+are only 1 or 2 subnets on a network so loading this data shouldn't hurt.
+This patch in my setup with 5000 networks reduces the net-list call from 27
+seconds to 7! Woot Woot :)
+
+Change-Id: I10eec4d79b522dfd685d3d2aa93a8d643104bba7
+Closes-bug: 1298053
+
+Notes:
+1. This is the first patch that gives us the chance to actually sit down and
+   learn something about sqlalchemy and sql in general.
+2. [context] Database management is a cornerstone of openstack projects, all of
+   which use the sqlalchemy package. The three key elements of neutron, namely
+   port, subnet, network, has their counterpart classes Port, Subnet, Network,
+   defined in module neutron.db.model_v2 as part of neutron API v2. Some
+   code-reuse ideas are implemented. For example, all of the three classes
+   inherit from the classes model_base.BASEV2 (for sharing common metaclasses
+   for table name conversion), HasId and HasTenant (for the id and tenant
+   columns). The tables mapped by the three classes are relational, with
+   orm.relationships defined towards each other. For the case in question, the
+   Network is defined to have a one-to-many relationship with Subnet, because
+   the latter has a foreign key on the former.
+3. [summary] Changing the laziness of relationship from 'select' to 'join'
+   enables the earger loading behavior, effectively avoiding many selects and
+   resulting in performance boost. Actually, other relationships defined in
+   this file are already has laziness set to 'join', leaving this one behind
+   today as an 'optimization'. One reason might be that the lazy parameter is
+   optional and default to 'select', making it too obscure to catch.
+4. We see from this patch that being lazy in computing does not always
+   improve performance. When we know that we are going to do a lot of small
+   tasks, we'd rather do as much as possible when given an oppotunity, to
+   reduce the per-unit overhead as much as possible.
+
+Changes:
+ neutron/db/models_v2.py | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+Patch:
+diff --git a/neutron/db/models_v2.py b/neutron/db/models_v2.py
+index 2c77ec6..718195f 100644 (file)
+--- a/neutron/db/models_v2.py
++++ b/neutron/db/models_v2.py
+@@ -199,7 +199,8 @@ class Network(model_base.BASEV2, HasId, HasTenant):
+ 
+     name = sa.Column(sa.String(255))
+     ports = orm.relationship(Port, backref='networks')
+-    subnets = orm.relationship(Subnet, backref='networks')
++    subnets = orm.relationship(Subnet, backref='networks',
++                               lazy="joined")
+     status = sa.Column(sa.String(16))
+     admin_state_up = sa.Column(sa.Boolean)
+     shared = sa.Column(sa.Boolean)
+

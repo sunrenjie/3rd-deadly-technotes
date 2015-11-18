@@ -1,0 +1,58 @@
+
+lab2.pse created @ 20120501
+
+This log is dedicated to the effort to solve the Challange after Exercise 4,
+all the while trying to systematically gain knowledge about pse (Page Size
+Extension) in x86.
+
+Now that we've got a fever at 20120501 - 20120507, we actually worked on this
+at 20120509, and solved it after 6 hours' work.
+
+Basic introductions from Wikipedia:
++ http://en.wikipedia.org/wiki/Page_Size_Extension
++ http://en.wikipedia.org/wiki/CPUID
+
++ How to detect existance of PSE feature?
+  + Execute CPUID with EAX == 1; check EDX lsb 3 (counting from 0) afterwards.
++ How to enable PSE?
+  + Set bit 4, PSE, of the system register CR4.
++ How to implement large page size in terms of PSE?
+  + Do the above in kern/entry.S; leave a flag for other kernel code.
+  + Implement a boot_map_segment_pse() function that defines mapping for
+    segments based on PSE: just set PTE_PS bit in page directory entries.
+  + Call boot_map_segment_pse() in i386_vm_init() if PSE is on.
+
+Page Size Extension @ http://en.wikipedia.org/wiki/Page_Size_Extension :
+Enabling PSE (by setting bit 4, PSE, of the system register CR4) changes this
+scheme. The entries in the page directory have an additional flag, in bit 7,
+named PS (for Page Size). This flag was ignored without PSE, but now, the page
+directory entry with PS set to 1 does not point to a page table, but to a
+single large 4 MiB page. The page directory entry with PS set to 0 behaves as
+without PSE.
+
+Feature detection and enabling are best done at kern/entry.S. At this point,
+the process is switched to 32-bit protected mode. What's more, we will have a
+chance here to notify kernel (by a variable) if the operations are successful.
+
+One thing that deserves notice is that addresses covered by a page unit share
+all the same attributes: physical page starting address, access control, etc.
+Therefore, the 4MB virtual memory of [KSTACKTOP-PTSIZE, KSTACKTOP) cannot be
+defined in a 4MB large page, as one portion of the memory is backed by physical
+memory while the other portion is not. Same can be said for [UPAGES, UVPT).
+As the computer physical memory amount, and therefore, npages is variable.
+(Though strictly speaking, we may argue that simply using one PGSIZE for all
+ pages can be somewhat more efficient.) Therefore, the virtual memory area
+that can be defined in terms of large page size is [KERNBASE, 4G).
+
+According to the experiment, after large page size is utilized, memory
+allocated by i386_vm_init() drops from approximately 460KB to 204KB, a decrease
+of 256KB. This is exactly the amount of memory used to define page tables for
+256MB physical memory.
+
+Updated at 20130629:
+After we implemented and enabled PSE in lab2, testing of the initial
+implementation of the paging system (which knows nothing about PSE) does not
+panic because the paging system is using base memory during the testing.
+Fundamentally, the paging system in lab2 is incompatible with PSE and we shall
+disable PSE when working on it.
+ 

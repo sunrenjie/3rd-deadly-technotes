@@ -1,0 +1,47 @@
+Change I8e8090fe: move wait_for & wait_for_delete into benchmark.utils
+
+URL: https://review.openstack.org/#/c/78524/
+
+Commit message:
+move wait_for & wait_for_delete into benchmark.utils
+
+benchmark.utils is a more proper module for function wait_for and
+wait_for_delete
+
+Change-Id: I8e8090fee4e2d1396f2e4adbf3449830e300130b
+
+Changes:
+0. The definitions for wait_for() and wait_for_delete() are moved from
+   rally/utils.py to rally/benchmark/utils.py.
+1. To reflect such changes, testing functions, mock objects for testing, calling
+   code are changed or moved accordingly.
+
+Note:
+0. It is with this review that we begin to use gerrit website and other tools to
+   perform diff on different patch sets, i.e. diff of diff.
+
+Difference of patchset 1 and 2:
++ Method:
+  + The content for diff is the whole web page of 'gitweb' link for the patch
+    set.
+  + Graphical diff is used to visualize the changes better. Temporarily,
++ 1:2
+  + rally/benchmark/scenarios/glance/utils.py
+    + A rebase that was caused by parents differ in the excerpt in quesiton: the
+      newer parent has a improvement on indent. Potential for such improvement
+      must have been observed by others who have her patch merged in the
+      interval.
++ 2:3
+  + rally/benchmark/utils.py
+    + At definition of function _wait_for_list_statuses(), two instances of call
+      to utils.wait_for() changed to wait_for(). It is a pity that the author
+      had not globally searched all calls to utils.wait_for() previously or
+      found it by running tests. Waiting for the commenter to pointer out
+      problems by blindly running tests is unfortunate.
++ 3:4
+  + Nothing really nontrivial except the change of committer from
+    'Kun Huang <gareth@openstacker.org>' to
+    'Gerrit Code Review <review@openstack.org>' plus an addition of a period in
+    the commit message which is removed again in patch set 5, the next and final
+    one.
+

@@ -1,0 +1,92 @@
+
+I55e8f4f3: Refactor netns.execute so that it is not necessary to check namespace
+
+URL: https://review.openstack.org/#/c/77788
+
+Commit info:
+Refactor netns.execute so that it is not necessary to check namespace
+
+I saw some code in a couple of reviews today that check whether a
+namespace is set and run it under "ip netns exec ..." if it is.
+Otherwise, it runs the command without it in the default namespace.
+
+Change-Id: I55e8f4f3523ec7a7c5a6f082addf918952a05741
+Closes-Bug: #1287524
+
+The key to this commit is the modified definition for the class:
+
+diff --git a/neutron/agent/linux/ip_lib.py b/neutron/agent/linux/ip_lib.py
+index 297c566..a140be2 100644 (file)
+--- a/neutron/agent/linux/ip_lib.py
++++ b/neutron/agent/linux/ip_lib.py
+@@ -452,18 +452,18 @@ class IpNetnsCommand(IpCommandBase):
+     def execute(self, cmds, addl_env={}, check_exit_code=True):
+         if not self._parent.root_helper:
+             raise exceptions.SudoRequired()
+-        elif not self._parent.namespace:
+-            raise Exception(_('No namespace defined for parent'))
+-        else:
+-            env_params = []
+-            if addl_env:
+-                env_params = (['env'] +
+-                              ['%s=%s' % pair for pair in addl_env.items()])
+-            return utils.execute(
+-                ['ip', 'netns', 'exec', self._parent.namespace] +
+-                env_params + list(cmds),
+-                root_helper=self._parent.root_helper,
+-                check_exit_code=check_exit_code)
++        ns_params = []
++        if self._parent.namespace:
++            ns_params = ['ip', 'netns', 'exec', self._parent.namespace]
++
++        env_params = []
++        if addl_env:
++            env_params = (['env'] +
++                          ['%s=%s' % pair for pair in addl_env.items()])
++        return utils.execute(
++            ns_params + env_params + list(cmds),
++            root_helper=self._parent.root_helper,
++            check_exit_code=check_exit_code)
+
+Note:
+1. The refactoring works by conditionally construct namespace-specific and
+   environment specific parameters separately so that only one call to
+   utils.execute() is needed.
+2. One reviewer commented that the ns_params can be better constructed as:
+   ns_params = ['ip', 'netns', 'exec', self._parent.namespace] if self._parent.namespace else []
+   We consider it difficult to determine which way is better. But the code
+   written by the owner is similar to existing code of constructing env_params,
+   so seems more appropriate.
+
+diff --git a/neutron/agent/linux/dhcp.py b/neutron/agent/linux/dhcp.py
+index 08cedfd..0139205 100644 (file)
+--- a/neutron/agent/linux/dhcp.py
++++ b/neutron/agent/linux/dhcp.py
+@@ -367,24 +367,16 @@ class Dnsmasq(DhcpLocalProcess):
+         if self.conf.dhcp_domain:
+             cmd.append('--domain=%s' % self.conf.dhcp_domain)
+ 
+-        if self.network.namespace:
+-            ip_wrapper = ip_lib.IPWrapper(self.root_helper,
+-                                          self.network.namespace)
+-            ip_wrapper.netns.execute(cmd, addl_env=env)
+-        else:
+-            # For normal sudo prepend the env vars before command
+-            cmd = ['%s=%s' % pair for pair in env.items()] + cmd
+-            utils.execute(cmd, self.root_helper)
++        ip_wrapper = ip_lib.IPWrapper(self.root_helper,
++                                      self.network.namespace)
++        ip_wrapper.netns.execute(cmd, addl_env=env)
+
+Note:
+1. This is one of the many other simplified user code excerpts because
+   of the refactoring.
+2. Previously, the command is executed conditionally based on different
+   mechanisms: if the interface is within namespace, method from
+   neutron/agent/linux/ip_lib.py is used; otherwise, method from
+   neutron/agent/linux/utils.py is used. After the refactoring, we can
+   use the former method uniformly. Obviously, it is better to have lib
+   code handle different conditions differently as much as possible so
+   that the user code can be simpler.
+3. It remains unknown how comes the two different methods.
+

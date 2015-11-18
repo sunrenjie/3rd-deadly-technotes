@@ -1,0 +1,137 @@
+Change I9d59e902: Added config value help text in ns metadata proxy
+
+Added config value help text in ns metadata proxy
+
+Change-Id: I9d59e902cf9ed89e29d93b29912c87f2bad73c7c
+Closes-Bug: #1215270
+
+NOTE:
+1. This is an excellent example of good inline documentation style. The final
+   and intermediate patch sets are good examples.
+
+DIFF of patch set 1:
+diff --git a/neutron/agent/metadata/namespace_proxy.py b/neutron/agent/metadata/namespace_proxy.py
+index ed9be8f..e2386cc 100644 (file)
+--- a/neutron/agent/metadata/namespace_proxy.py
++++ b/neutron/agent/metadata/namespace_proxy.py
+@@ -146,10 +146,15 @@ class ProxyDaemon(daemon.Daemon):
+ def main():
+     eventlet.monkey_patch()
+     opts = [
+-        cfg.StrOpt('network_id'),
+-        cfg.StrOpt('router_id'),
+-        cfg.StrOpt('pid_file'),
+-        cfg.BoolOpt('daemonize', default=True),
++        cfg.StrOpt('network_id',
++                   help=_('Network that instance metadata is proxied.')),
++        cfg.StrOpt('router_id',
++                   help=_('Router that instance metadata is proxied')),
++        cfg.StrOpt('pid_file',
++                   help=_('Location of pid file.')),
++        cfg.BoolOpt('daemonize',
++                    default=True,
++                    help=_('Runs as daemon.')),
+         cfg.IntOpt('metadata_port',
+                    default=9697,
+                    help=_("TCP Port to listen for metadata server "
+Note:
+0. Inline documentation is useful in code, and particularly useful in option
+   handling code.
+1. This patch set is certainly inviting improvements. For one thing, the help
+   info is a bit vague and confusing. On the other hand, they are not uniform,
+   leading to more confusions.
+
+DIFF of patch set 2:
+diff --git a/neutron/agent/metadata/namespace_proxy.py b/neutron/agent/metadata/namespace_proxy.py
+index ed9be8f..2c6f0d9 100644 (file)
+--- a/neutron/agent/metadata/namespace_proxy.py
++++ b/neutron/agent/metadata/namespace_proxy.py
+@@ -146,10 +146,17 @@ class ProxyDaemon(daemon.Daemon):
+ def main():
+     eventlet.monkey_patch()
+     opts = [
+-        cfg.StrOpt('network_id'),
+-        cfg.StrOpt('router_id'),
+-        cfg.StrOpt('pid_file'),
+-        cfg.BoolOpt('daemonize', default=True),
++        cfg.StrOpt('network_id',
++                   help=_('Instance metadata on this network '
++                          'will be proxied.')),
++        cfg.StrOpt('router_id',
++                   help=_('Metadata of instances connected to this router '
++                          'will be proxied.')),
++        cfg.StrOpt('pid_file',
++                   help=_('Location of pid file of this process.')),
++        cfg.BoolOpt('daemonize',
++                    default=True,
++                    help=_('Run as daemon.')),
+         cfg.IntOpt('metadata_port',
+                    default=9697,
+                    help=_("TCP Port to listen for metadata server "
+NOTEs:
+1. Now the author was trying to improve by explaining things better. But he
+   introduced a new problem. The help info shall explain the item rather than
+   the functionalities or effects, as pointed out by a commenter.
+
+DIFF of patch set 3:
+diff --git a/neutron/agent/metadata/namespace_proxy.py b/neutron/agent/metadata/namespace_proxy.py
+index ed9be8f..73e710c 100644 (file)
+--- a/neutron/agent/metadata/namespace_proxy.py
++++ b/neutron/agent/metadata/namespace_proxy.py
+@@ -146,10 +146,17 @@ class ProxyDaemon(daemon.Daemon):
+ def main():
+     eventlet.monkey_patch()
+     opts = [
+-        cfg.StrOpt('network_id'),
+-        cfg.StrOpt('router_id'),
+-        cfg.StrOpt('pid_file'),
+-        cfg.BoolOpt('daemonize', default=True),
++        cfg.StrOpt('network_id',
++                   help=_('Network that will have instance metadata '
++                          'proxied.')),
++        cfg.StrOpt('router_id',
++                   help=_('Router that will have connected instances\''
++                          'metadata proxied.')),
++        cfg.StrOpt('pid_file',
++                   help=_('Location of pid file of this process.')),
++        cfg.BoolOpt('daemonize',
++                    default=True,
++                    help=_('Run as daemon.')),
+         cfg.IntOpt('metadata_port',
+                    default=9697,
+                    help=_("TCP Port to listen for metadata server "
+NOTE:
+1. This time a real improvement. But help info for 'router_id' was carrying
+   a typo.
+
+diff --git a/neutron/agent/metadata/namespace_proxy.py b/neutron/agent/metadata/namespace_proxy.py
+index ed9be8f..0f32328 100644 (file)
+--- a/neutron/agent/metadata/namespace_proxy.py
++++ b/neutron/agent/metadata/namespace_proxy.py
+@@ -146,10 +146,17 @@ class ProxyDaemon(daemon.Daemon):
+ def main():
+     eventlet.monkey_patch()
+     opts = [
+-        cfg.StrOpt('network_id'),
+-        cfg.StrOpt('router_id'),
+-        cfg.StrOpt('pid_file'),
+-        cfg.BoolOpt('daemonize', default=True),
++        cfg.StrOpt('network_id',
++                   help=_('Network that will have instance metadata '
++                          'proxied.')),
++        cfg.StrOpt('router_id',
++                   help=_('Router that will have connected instances\' '
++                          'metadata proxied.')),
++        cfg.StrOpt('pid_file',
++                   help=_('Location of pid file of this process.')),
++        cfg.BoolOpt('daemonize',
++                    default=True,
++                    help=_('Run as daemon.')),
+         cfg.IntOpt('metadata_port',
+                    default=9697,
+                    help=_("TCP Port to listen for metadata server "
+NOTE:
+1. This time the whole thing is finally of adequate quality.
+2. It is certainly difficult to get things perfect. We'd definitely admire
+   Knuth for his extraordinary pursuit of perfection.
+

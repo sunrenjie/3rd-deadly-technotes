@@ -1,0 +1,2 @@
+To print a man page using mono font:
+groff -mandoc /usr/share/man/man1/tcpdump.1 -f c > /tmp/tcpdump.ps

@@ -1,0 +1,36 @@
+
+Topic: bug/1226351
+Project: https://review.openstack.org/#/c/33409/
+
+We came across the patch sets ID Idce8d21a at the top of merged list. After a
+little analysis, we found this is a fundamental improvement addressing the bug
+reported at https://bugs.launchpad.net/nova/+bug/1226351
+
+Interestingly, the initial work started at Jun 18, 2013 while the bug is
+reported at Sep 17, 2013, three months earlier. The project must have been
+targetting a larger and more generic problem.
+
+There are actually a total of four patch sets targetting this bug:
+https://review.openstack.org/#/q/project:openstack/nova+branch:master+topic:bug/1226351,n,z
+Of them,  (as of Mar 5, 2014) 1 is merged, 1 abandoned, and 2 likely to be
+accepted.
+
+Such lengthy and complicated stories make the project and bug so interesting.
+
+Turned out that the real problem with this project can be reflected by this
+review comment:
+
+Joe Gordon		Feb 4
+
+Patch Set 45: I would prefer that you didn't merge this
+
+Without even looking at the patch itself, -1 because:
+
+* patch is too big: we generally aim for 500 lines or less
+* BP isn't approved
+
+The author is preparing a all-in-one patch that does just about everything,
+effectively away from  requirements stated in blueprints. To sum up, this is
+a good counterexample of cooperative open source development.
+
+

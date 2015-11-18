@@ -1,0 +1,6 @@
+Option to play left channel (channel 0)  in both speakers:
+-af channels=2:2:0:1:0:0
+
+To play right channel (channel 1) in both speakers:
+-af channels=2:2:1:0:1:1
+

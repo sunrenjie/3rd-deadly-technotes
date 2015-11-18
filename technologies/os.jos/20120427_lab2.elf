@@ -1,0 +1,213 @@
+
+lab2_elf created @ 20120427
+
+We return to the elf topic in lab2 because of the fact that the function
+debuginfo_eip() defined in kern/kdebug.c manipulates stabs-related data
+structures. For the sake of solving Exercise 4, an understanding of stabs is
+seen as a prerequisite. We suspect that complemented with knowledge of stabs,
+we shall be able to fully understand (nearlly) ALL ELF related topics. So this
+effort shall cover them all.
+
+The definite guide for stabs (possibly GCC-specific) is:
+'The "stabs" representation of debugging information' in the form of
+'stabs.html'.
+
+Tools to tell about ELF binaries are available from GNU Binutils, comprising
+of nm, objdump, readelf:
+
+nm:      lists symbols from object files
+objdump: displays information from object files
+readelf: displays information about ELF files
+
+It shall be noted that GNU Binutils, 'stabs' documentation are all authored by
+programmers from Cygnus Solutions.
+
+The reason behind the co-existance of objdump and readelf, two tools with
+potentially common functionalities, is stated in binutils/readelf.c:
+
+/* The difference between readelf and objdump:
+
+   Both programs are capabale of displaying the contents of ELF format files,
+   so why does the binutils project have two file dumpers ?
+
+   The reason is that objdump sees an ELF file through a BFD filter of the
+   world; if BFD has a bug where, say, it disagrees about a machine constant
+   in e_flags, then the odds are good that it will remain internally
+   consistent.  The linker sees it the BFD way, objdump sees it the BFD way,
+   GAS sees it the BFD way.  There was need for a tool to go find out what
+   the file actually says.
+
+   This is why the readelf program does not link against the BFD library - it
+   exists as an independent program to help verify the correct working of BFD.
+
+   There is also the case that readelf can provide more information about an
+   ELF file than is provided by objdump.  In particular it can display DWARF
+   debugging information which (at the moment) objdump cannot.  */
+
+For sake of completeness, here repeats the definitions from Wikipedia:
+Each ELF file is made up of one ELF header, followed by file data including:
++ Program header table, describing zero or more segments
+  + containing info for runtime execution of the file
+  + can be examined via 'objdump --private-headers' or
+    'readelf --program-headers'
++ Section header table, describing zero or more sections
+  + containing info for linking and relocation (that's what can be
+    precisely controlled in kern/kernel.ld in JOS)
+  + can be examined via 'objdump --section-headers' or
+    'readelf --section-headers'
++ Data referred to by entries in the program/section header table
+
+We analyze one JOS kernel as follow:
+(We previously did similar things, but with hexdump and manual calculations.)
+
+$ readelf obj/kern/kernel --section-headers
+There are 11 section headers, starting at offset 0x17600:
+
+Section Headers:
+  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
+  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
+  [ 1] .text             PROGBITS        f0100000 001000 003bd5 00  AX  0   0 16
+  [ 2] .rodata           PROGBITS        f0103bd8 004bd8 000ba3 00   A  0   0  4
+  [ 3] .stab             PROGBITS        f010477c 00577c 00642d 0c   A  4   0  4
+  [ 4] .stabstr          STRTAB          f010aba9 00bba9 00261c 00   A  0   0  1
+  [ 5] .data             PROGBITS        f010e000 00f000 008598 00  WA  0   0 4096
+  [ 6] .bss              NOBITS          f01165a0 017598 000690 00  WA  0   0 32
+  [ 7] .comment          PROGBITS        00000000 017598 00001c 01  MS  0   0  1
+  [ 8] .shstrtab         STRTAB          00000000 0175b4 00004c 00      0   0  1
+  [ 9] .symtab           SYMTAB          00000000 0177b8 0009f0 10     10  70  4
+  [10] .strtab           STRTAB          00000000 0181a8 0005b9 00      0   0  1
+Key to Flags:
+  W (write), A (alloc), X (execute), M (merge), S (strings)
+  I (info), L (link order), G (group), x (unknown)
+  O (extra OS processing required) o (OS specific), p (processor specific)
+
+$ readelf obj/kern/kernel --program-headers
+
+Elf file type is EXEC (Executable file)
+Entry point 0xf010000c
+There are 3 program headers, starting at offset 52
+
+Program Headers:
+  Type           Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align
+  LOAD           0x001000 0xf0100000 0xf0100000 0x0d1c5 0x0d1c5 R E 0x1000
+  LOAD           0x00f000 0xf010e000 0xf010e000 0x08598 0x08c30 RW  0x1000
+  GNU_STACK      0x000000 0x00000000 0x00000000 0x00000 0x00000 RWE 0x4
+
+ Section to Segment mapping:
+  Segment Sections...
+   00     .text .rodata .stab .stabstr
+   01     .data .bss
+   02
+
+The output implies the implementation details that sections are mapped into
+segments. In another word, the program header table may arrange several
+sections to be loaded together into one segment, so that they share the same
+process management including flags (R/W/E).
+It shall be noted that sections 7-10 are NOT loaded at runtime, as they are
+meaningless at runtime and not specified in kernel.ld at all. This is the
+reason why have to manually load section header string table, symble table,
+string table into memory in order to load the symbol table in the last
+challange of lab1. When it comes to stabs and stab strings, however, we do
+not need to do this, now that the sections .stab and .stabstr are specified
+in kernel.ld and arranged to be loaded into memory as part of segment 00.
+
+(UPDATE 20131220)
+The .bss section is special in that it specifies a runtime size not available
+in the ELF binary image. So the next section has the same offset as it.
+
+To familiarize yourself with stabs data structures, examine output of
+'objdump -G'. But it turns out that objdump does not define synonyms for
+symbol types quite unambiguously. We have to manually figure out which is
+which:
+
+BINCL  N_BINCL: Beginning of a INCLude file
+EINCL  N_EINCL: Ending of a INCLude file
+EXCL   N_EXCL: EXCLuding a deleted (repeated) occurrence of a include file
+FUN    N_FUN: FUNction name
+GSYM   N_GSYM: Global SYMbol
+HdrSym Header of Symbols
+LBRAC  N_LBRAC: Beginning of a lexical block
+LCSYM  N_LCSYM: BSS segment file-scope variable
+LSYM   N_LSYM: Stack variable
+OPT    N_OPT: Debugger options
+PSYM   N_PSYM: Parameter variable
+RBRAC  N_RBRAC: End of a lexical block
+RSYM   N_RSYM: Register variable
+SLINE  N_SLINE: Line number in text segment
+SO     N_SO: Path and name of source file
+SOL    N_SOL: Name of include file
+STSYM  N_STSYM: Data segment file-scope variable
+
+20120429 20:37
+
+We've solved exercise 4 today without leaving much log here. That is because
+we previously decided that printing kern/kdebug.c and leaving comments on
+papers better than keeping staring at the computer screen. And then we read
+the code and gained enough knowledge and confidence to solve Exercise 4. Now
+we will transcribe such comments to our notes pool here.
+
+It turned out we understood algorithms in kern/kdebug.c quite well enough
+(actually we have only made several trivial changes to it today), but a lack
+of familarity with the stabs data structure make us less confident in keeping
+working on it. This is quite a pity since the method to examine stabs data
+structures ('objdump obj/kern/kernel -G') is already mentioned in instructions
+in Exercise 4. Forcing myself to read the text carefully will do; but we just
+did not do it. From now on, I am fully convinced that working on MIT 6.828 is
+a task with hardly any risks, just as learning a programming language. And I
+shall keep that in mind and be more confident and therefore, more patient.
+
+Now back to the topic.
+
+To understand stabs, we could do the following:
++ read the code: kern/kdebug.*, inc/stabs.h
++ read the documentation: stabs.html
++ examine real world stabs data via 'objdump obj/kern/kernel -G'
++ examine correspondence between disassembled code and symbols via
+  'less -S obj/kern/kernel.asm'
++ examine intermediate status of stabs via 'less -S init.s' (see instruction
+  at Exercise 4 for how to generate it)
+
+Along the way, we found that
++ The stabs of indices 0, 1 are:
+0      SO     0      0      f0100000 1      /tmp/cch7f3wj.s
+1      SOL    0      0      f010000c 17     kern/entry.S
+  + This may help explain while searching N_SO for file name, if lfile is left
+    as 0, the function will return -1. The stab 0 does NOT contain any actual
+    code (0xf0100000 - 0xf010000c contains 4 .long values).
+  + XXX: why the seemingly 'temp' assembly file of type 'N_SO'  occupies stab
+    0 while the first source file entry.S is placed at place 1 with type
+    'N_SOL'? N_SOL stands for included source file, right?
++ After examining N_SO stabs along
+  ('objdump /s/lab2/obj/kern/kernel -G | grep SO | grep -v SOL | less -S'):
+0      SO     0      0      f0100000 1      /tmp/cch7f3wj.s
+13     SO     0      2      f0100040 30     kern/init.c
+113    SO     0      0      f010015b 0
+114    SO     0      2      f010015c 2884   kern/console.c
+570    SO     0      0      f01008fa 0
+571    SO     0      2      f01008fc 3703   kern/monitor.c
+  we can find that:
+  + N_SO stabs, except for the 1st 'temp' one, come in beginning-ending pairs.
+    The distinguishing feature for them is that the former has no zero string
+    table index pointing the file name, while the latter does not.
+  + As an unexpected finding, addresses of beginning N_SO stabs (and the
+    addresses of the first function of the source file) are aligned at 4-byte
+    boundaries, after being computed as 1 greater than address of the last
+    byte of the previous file. When the calculated address is already properly
+    aligned by chance, no more alignment is performed and the adjacent N_SO
+    stabs have values that differ by 1, the algorithm at stab_binsearch() may
+    produce incorrect values (see ./20120305_lab2.questions for details).
++ Despite the fact the function stab_binsearch() actually WORKS, we do believe
+  there are flaws in the code:
+  + The '+1' problem; see above comments.
+  + Function stab_binsearch() finally determine value of region_left based on
+    region_right. I believe both of them are determined precisely and this is
+    unnecessary.
+  + Function debuginfo_eip() works against included source files by scanning
+    backward from line stab to locate the nearest N_SOL or N_SO with nonzero
+    n_value. But it seems that this nonzero n_value shall be n_strx. N_SO
+    stabs will always have nonzero n_value: address of the first byte of the
+    code generated for the source file if it's beginning stab or the last byte
+    for ending stab. It's n_strx that distinguishes between them. If this is
+    confirmed to be a problem, it does no harm, however. Normally no ending
+    N_SO will be encountered along the searching path.
+

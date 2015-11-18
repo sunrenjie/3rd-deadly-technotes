@@ -1,0 +1,76 @@
+
+20120315
+
+We've decided to keep a systematic collection of ubuntu common senses,
+experiences, tricks, etc. so as to save life for others (and me).
+
+1. How to build a ubuntu package from source?
++ apt-get source pkg-name
+This will automatically download and unpack the source code for your system.
+Or, if you manually download the three files in current dir:
+xxx.orig.tar.bz2 xxx.debian.tar.gz xxx.dsc
+you can unpack the source code by
++ dpkg-source -x xxx.dsc
+Then compile it:
++ cd pkg-name && dpkg-buildpackage -rfakeroot -b
+
+The various tools will kindly inform you what's missing and what shall you do.
+See more at: https://wiki.ubuntu.com/PackagingGuide/Complete
+
+2. How to dump exported function name from shared libraries?
+nm -D
+
+3. Usages of the various package management tools
+dpkg -l pkg	list packages matching given pattern
+dpkg -L pkg	list files INSTALLED to your system from the package
+dpkg -S pkg	search the INSTALLED package that provides a filename
+dpkg -p pkg	print package details, including dependencies on other pkgs
+apt-rdepends	print package dependency info recursively
+
+4. Over examining ubuntu source code.
+
+After minimal examination, it suddenly occured to me that feature extensions
+in third party software (say, multitouch support for X) are released in the
+form of patches. Take the package xserver-xorg-input-evdev for example. This
+package originally have no knowledge of multi-touch. Majority of the
+modifications reside in the patch:
+xserver-xorg-input-evdev-2.6.0/debian/patches/101-gestures.patch
+When building the package, the patches are applied to the original code.
+Since we want to examine the code of the PACKAGE, we'd better work on code
+from which a successful build has been generated, at which time all patches
+are properly applied.
+
+Now that we are currently interested in utouch, we want to get the code for
+these relevant packages: libutouch-evemu1 libutouch-frame1 libutouch-geis1
+libutouch-grail1 xserver-xorg-input-evdev.
+
+We need some more 'advanced' tools that could help to understand code for
+multiple projects working together, without having to resort to grep/sed.
+Luo Wei, the CS girl that attracted me much somehow at some point, suggested
+CodeBlocks, a tool indeed serves such purpose well. May god bless her.
+
+@/t/a/incoming/ubuntu-src-release-11.10:
+apt-get source libutouch-evemu1 libutouch-frame1 libutouch-geis1 libutouch-grail1 xserver-xorg-input-evdev
+
+Building these packages requirs installing a lot of packages. Details omitted.
+Just leave the temp files generated during the building process as is.
+Consider that the code might reference system headers, we will want them too:
+1. linux headers, mainly @ /usr/src/linux-headers-3.0.0-12/include/.
+2. other headers installed by third party softwares like gcc, mainly @
+   /usr/include/.
+
+Generate 7z archive for the source:
+ln -s /usr/include/ usr.inc
+ln -s /usr/src/linux-headers-3.0.0-12/include/ linux.inc
+find -L | grep '\.cpp$\|\.c$\|\.h$'  | sed 's:^\.\/::' > ../ubuntu-src-release-11.10.lite.list
+7z a ../ubuntu-src-release-11.10.7z -l @../ubuntu-src-release-11.10.lite.list
+(Some broken symlinks are just removed.)
+
+When extracting in Windows, 7z will prompt for file replacement. This is
+because file system is case-sensitive in Linux and not in Windows.
+Unfortunately, we have ip6t_HL.h and ip6t_hl.h @ usr.inc/linux/netfilter_ipv6.
+Choose 'auto-rename'.
+
+Now that we managed to run CodeBlocks in Debian, this is not likely to be a
+big problem.
+

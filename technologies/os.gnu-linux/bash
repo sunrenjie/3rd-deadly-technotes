@@ -1,0 +1,9 @@
+
+bash tricks created @ 20120612
+
+1. bash array
++ create an array variable
+  + tables=($l)
++ traverse thru an array
+  + for t in ${tables[@]}; do ...; done
+

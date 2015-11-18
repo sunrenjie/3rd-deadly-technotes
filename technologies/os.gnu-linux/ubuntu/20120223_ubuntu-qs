@@ -1,0 +1,32 @@
+Questions:
+1. How could we use 'bzr branch' correctly?
+The following command hangs:
+bzr branch https://code.launchpad.net/~utouch-packaging/utouch-qml/ubuntu
+
+2. How to print lib name in gdb when dbgsym are installed?
+
+3. Output of 'apt-get source' is misleading; do we still need
+'dpkg-source -x foo_version-revision.dsc'?
+No; answered in https://wiki.ubuntu.com/PackagingGuide/Complete
+
+s@ubuntu:/opt/utouch$ apt-get source utouch-qml
+Reading package lists... Done
+Building dependency tree       
+Reading state information... Done
+NOTICE: 'utouch-qml' packaging is maintained in the 'Bzr' version control system at:
+https://code.launchpad.net/~utouch-packaging/utouch-qml/ubuntu
+Please use:
+bzr branch https://code.launchpad.net/~utouch-packaging/utouch-qml/ubuntu
+to retrieve the latest (possibly unreleased) updates to the package.
+Need to get 169 kB of source archives.
+Get:1 http://mirrors.sohu.com/ubuntu/ oneiric/universe utouch-qml 1.0.4-0ubuntu1 (dsc) [1,913 B]
+Get:2 http://mirrors.sohu.com/ubuntu/ oneiric/universe utouch-qml 1.0.4-0ubuntu1 (tar) [165 kB]
+Get:3 http://mirrors.sohu.com/ubuntu/ oneiric/universe utouch-qml 1.0.4-0ubuntu1 (diff) [2,063 B]
+Fetched 169 kB in 2s (61.1 kB/s) 
+gpgv: Signature made Thu 11 Aug 2011 08:37:00 AM HKT using RSA key ID E5923C18
+gpgv: Can't check signature: public key not found
+dpkg-source: warning: failed to verify signature on ./utouch-qml_1.0.4-0ubuntu1.dsc
+dpkg-source: info: extracting utouch-qml in utouch-qml-1.0.4
+dpkg-source: info: unpacking utouch-qml_1.0.4.orig.tar.gz
+dpkg-source: info: unpacking utouch-qml_1.0.4-0ubuntu1.debian.tar.gz
+

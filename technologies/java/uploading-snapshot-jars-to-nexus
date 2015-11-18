@@ -1,0 +1,67 @@
+
+Uploading snapshot jars to nexus
+
+CloudStack uses 3rd party jars as dependencies. The jar and/or pom files there
+can be downloaded, but we could not setup nexus proxy repository for them
+(maybe the website contents cannot be indexed, key files are missing, etc).
+Therefore, the only way to have nexus serve them is to download these files
+and then upload them to nexus. The nexus web interface and rest api only
+accept release jar/mom files. For snapshot versions, though, it is possible to
+do it via mvn deploy (see reference [1], [2]). The details procedures are
+worked out with the help of the references [3], [4], [5]. The reference [6] is
+the official guide from sonatype.
+
+====================================
+1. fetching the jar and/or pom files
+
+Given the error messsage like "Failure to find
+org.midonet:midonet-client:jar:1.1.0 in http://localhost:8081/nexus/...",
+search the internet for the string "org.midonet:midonet-client:jar:1.1.0"
+(which is of format <groupId>:<artifactId>:<version>), then the jar and pom
+download URL will be available. Otherwise ask mvn to download it:
+
+First, disable mirroring by nexus in ~/.m2/settings.xml. Then execute
+mvn clean install -P systemvm,developer. It will download everything in
+~/.m2/repository. Now the relevant jar and pom files can be located by a
+find+grep command.
+
+==========================================
+2. allowing maven to authenticate on nexus
+
+have in ~/.m2/settings.xml
+<settings>
+  <servers>
+        <server>
+            <id>nexus</id>
+            <username>deployment</username>
+            <password>sunrj_</password>
+        </server>
+  </servers>
+  <!-- further configurations -->
+</settings>
+
+=============================================
+3. deploy to nexus via mvn deploy:deploy-file
+
+The groupId, artifactId, and version options are available in the pom file, if
+the pom file is provided, they could be droped. The repositoryId shall be
+exactly the same string as in the server id in ~/.m2/settings.xml above. You
+may use something like Xenus if you like.
+
+We have to upload to snapshots repository. Nexus recommend not to unload
+snapshot jars. Actually, the web interface disables it.
+
+execute:
+mvn deploy:deploy-file -Dpackaging=jar -Dfile=juniper-contrail-api-1.0-20131001.003401-3.jar -DpomFile=juniper-contrail-api-1.0-20131001.003401-3.pom -DrepositoryId=nexus -Durl=http://localhost:8081/nexus/content/repositories/snapshots
+
+Note: alway run mvn with '-U' to force it recheck the repository updates after
+the deployment is performed successfully.
+
+References:
+[1] https://issues.sonatype.org/browse/NEXUS-3919
+[2] https://support.sonatype.com/entries/22189106-How-can-I-programatically-upload-an-artifact-into-Nexus-
+[3] http://maven.apache.org/guides/mini/guide-3rd-party-jars-remote.html
+[4] http://maven.apache.org/plugins/maven-deploy-plugin/deploy-file-mojo.html
+[5] http://stackoverflow.com/questions/16219052/mvn-deploydeploy-file-failed-to-deploy-artifacts-could-not-find-artifact
+[6] https://support.sonatype.com/entries/21283268-Configure-Maven-to-Deploy-to-Nexus
+

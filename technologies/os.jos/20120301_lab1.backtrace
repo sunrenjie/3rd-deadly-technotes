@@ -1,0 +1,230 @@
+
+Mar 1, 2011
+
+Tracing test_backtrace(6)
+
+Actually we've done this before and completed the trace code, yet that log was
+lost and this experiment is re-done.
+(UPDATE: this log is found @ 20120423 and now is 20111211_lab1.test_backtrace)
+
+Here comes disassembled instructions from kernel.asm:
+
+// Test the stack backtrace function (lab 1 only)
+void
+test_backtrace(int x)
+{
+f01000dd:       55                      push   %ebp
+f01000de:       89 e5                   mov    %esp,%ebp
+f01000e0:       53                      push   %ebx
+f01000e1:       83 ec 14                sub    $0x14,%esp
+f01000e4:       8b 5d 08                mov    0x8(%ebp),%ebx
+        cprintf("entering test_backtrace %d\n", x);
+f01000e7:       89 5c 24 04             mov    %ebx,0x4(%esp)
+f01000eb:       c7 04 24 72 17 10 f0    movl   $0xf0101772,(%esp)
+f01000f2:       e8 f8 08 00 00          call   f01009ef <cprintf>
+        if (x > 0)
+f01000f7:       85 db                   test   %ebx,%ebx
+f01000f9:       7e 0d                   jle    f0100108 <test_backtrace+0x2b>
+                test_backtrace(x-1);
+f01000fb:       8d 43 ff                lea    -0x1(%ebx),%eax
+f01000fe:       89 04 24                mov    %eax,(%esp)
+f0100101:       e8 d7 ff ff ff          call   f01000dd <test_backtrace>
+f0100106:       eb 1c                   jmp    f0100124 <test_backtrace+0x47>
+        else
+                mon_backtrace(0, 0, 0);
+f0100108:       c7 44 24 08 00 00 00    movl   $0x0,0x8(%esp)
+f010010f:       00 
+f0100110:       c7 44 24 04 00 00 00    movl   $0x0,0x4(%esp)
+f0100117:       00 
+f0100118:       c7 04 24 00 00 00 00    movl   $0x0,(%esp)
+f010011f:       e8 e4 05 00 00          call   f0100708 <mon_backtrace>
+        cprintf("leaving test_backtrace %d\n", x);
+f0100124:       89 5c 24 04             mov    %ebx,0x4(%esp)
+f0100128:       c7 04 24 8e 17 10 f0    movl   $0xf010178e,(%esp)
+f010012f:       e8 bb 08 00 00          call   f01009ef <cprintf>
+}
+f0100134:       83 c4 14                add    $0x14,%esp
+f0100137:       5b                      pop    %ebx
+f0100138:       5d                      pop    %ebp
+f0100139:       c3                      ret    
+
+It shall be noted that the 'prologue' code for each subroutine will be
+'push %ebp; mov %esp,%ebp'. In stead of 'push %ebp', we shall break at the
+immediately next instruction, as it will resemble the environment of the
+our trace code.
+
+It's easy to calculate the kernel stack top: in mygdt, stack segment base is
+-0xf0000000, so physical address of the kernel stack top will be esp-0xf0000000.
+
+Now comes the trace output:
+
+$ /opt/bochs-2.4.6_x86_64_debugging/bin/bochs -q -f lab1.bxrc-2.4.6.slim
+========================================================================
+                       Bochs x86 Emulator 2.4.6
+             Build from CVS snapshot, on February 22, 2011
+                   Compiled at Sep 19 2011, 09:51:17
+========================================================================
+00000000000i[     ] reading configuration from lab1.bxrc-2.4.6.slim
+00000000000i[     ] installing x module as the Bochs GUI
+00000000000i[     ] using log file lab1.bxrc-2.4.6.slim.log
+Next at t=0
+(0) [0x00000000fffffff0] f000:fff0 (unk. ctxt): jmp far f000:e05b         ; ea5be000f0
+<bochs:1> b 0x1000e0 <--------------------------------------------------------------------------------------- the instruction next to 'push %ebp; mov %esp,%ebp'
+<bochs:2> c
+(0) Breakpoint 1, 0x00000000001000e0 in ?? ()
+Next at t=153858133
+(0) [0x00000000001000e0] 0008:00000000f01000e0 (unk. ctxt): push ebx                  ; 53
+<bochs:3> r
+rax: 0x00000000:00000000 rcx: 0x00000000:000003d5
+rdx: 0x00000000:000003d5 rbx: 0x00000000:00010094
+                    |<------------------------------------------------------------ esp
+                    |                        |<----------------------------------- ebp (identical to esp as the previous instruction is 'mov %esp,%ebp')
+                |------|                 |------|
+rsp: 0x00000000:f010efc8 rbp: 0x00000000:f010efc8
+rsi: 0x00000000:00010094 rdi: 0x00000000:0000ffac
+r8 : 0x00000000:00000000 r9 : 0x00000000:00000000
+r10: 0x00000000:00000000 r11: 0x00000000:00000000
+r12: 0x00000000:00000000 r13: 0x00000000:00000000
+r14: 0x00000000:00000000 r15: 0x00000000:00000000
+rip: 0x00000000:f01000e0
+eflags 0x00000086: id vip vif ac vm rf nt IOPL=0 of df if tf SF zf af PF cf
+<bochs:4> x /32dx 0x10efc8 <----------------------------------------------------- esp - 0xf0000000
+[bochs]:                                     |<---------------------------------- previous ebp
+                                             |              |<------------------- function call return address
+                                             |              |               |<--- argument list
+                                            \|/            \|/             \|/
+                                        |--------|      |--------|      |--------|
+0x000000000010efc8 <bogus+       0>:	0xf010eff8	0xf01001cd	0x00000005	0x00000001
+0x000000000010efd8 <bogus+      16>:	0x00000003	0x00000004	0x00000000	0x00000000
+0x000000000010efe8 <bogus+      32>:	0x00000000	0x00646c72	0x00000000	0x00000000
+0x000000000010eff8 <bogus+      48>:	0x00000000	0xf010003d	0x00000000	0x00000000
+0x000000000010f008 <bogus+      64>:	0x0000ffff	0x10cf9b00	0x0000ffff	0x10cf9300
+0x000000000010f018 <bogus+      80>:	0xf0000017	0x00000010	0x32311b00	0x36353433
+0x000000000010f028 <bogus+      96>:	0x30393837	0x09083d2d	0x72657771	0x69757974
+0x000000000010f038 <bogus+     112>:	0x5d5b706f	0x7361000a	0x68676664	0x3b6c6b6a
+<bochs:5> c
+(0) Breakpoint 1, 0x00000000001000e0 in ?? ()
+Next at t=153861270
+(0) [0x00000000001000e0] 0008:00000000f01000e0 (unk. ctxt): push ebx                  ; 53
+<bochs:6> r
+rax: 0x00000000:00000004 rcx: 0x00000000:000003d5
+rdx: 0x00000000:000003d5 rbx: 0x00000000:00000005
+rsp: 0x00000000:f010efa8 rbp: 0x00000000:f010efa8
+rsi: 0x00000000:00010094 rdi: 0x00000000:0000ffac
+r8 : 0x00000000:00000000 r9 : 0x00000000:00000000
+r10: 0x00000000:00000000 r11: 0x00000000:00000000
+r12: 0x00000000:00000000 r13: 0x00000000:00000000
+r14: 0x00000000:00000000 r15: 0x00000000:00000000
+rip: 0x00000000:f01000e0
+eflags 0x00000006: id vip vif ac vm rf nt IOPL=0 of df if tf sf zf af PF cf
+<bochs:7> x /32dx 0x10efa8
+[bochs]:
+0x000000000010efa8 <bogus+       0>:	0xf010efc8	0xf0100106	0x00000004	0x00000005
+0x000000000010efb8 <bogus+      16>:	0x00000000	0x00000000	0x00000000	0x00010094
+0x000000000010efc8 <bogus+      32>:	0xf010eff8	0xf01001cd	0x00000005	0x00000001
+0x000000000010efd8 <bogus+      48>:	0x00000003	0x00000004	0x00000000	0x00000000
+0x000000000010efe8 <bogus+      64>:	0x00000000	0x00646c72	0x00000000	0x00000000
+0x000000000010eff8 <bogus+      80>:	0x00000000	0xf010003d	0x00000000	0x00000000
+0x000000000010f008 <bogus+      96>:	0x0000ffff	0x10cf9b00	0x0000ffff	0x10cf9300
+0x000000000010f018 <bogus+     112>:	0xf0000017	0x00000010	0x32311b00	0x36353433
+<bochs:8> c
+(0) Breakpoint 1, 0x00000000001000e0 in ?? ()
+Next at t=153864407
+(0) [0x00000000001000e0] 0008:00000000f01000e0 (unk. ctxt): push ebx                  ; 53
+<bochs:9> r
+rax: 0x00000000:00000003 rcx: 0x00000000:000003d5
+rdx: 0x00000000:000003d5 rbx: 0x00000000:00000004
+rsp: 0x00000000:f010ef88 rbp: 0x00000000:f010ef88
+rsi: 0x00000000:00010094 rdi: 0x00000000:0000ffac
+r8 : 0x00000000:00000000 r9 : 0x00000000:00000000
+r10: 0x00000000:00000000 r11: 0x00000000:00000000
+r12: 0x00000000:00000000 r13: 0x00000000:00000000
+r14: 0x00000000:00000000 r15: 0x00000000:00000000
+rip: 0x00000000:f01000e0
+eflags 0x00000002: id vip vif ac vm rf nt IOPL=0 of df if tf sf zf af pf cf
+<bochs:10> x /32dx 0x10ef88
+[bochs]:
+0x000000000010ef88 <bogus+       0>:	0xf010efa8	0xf0100106	0x00000003	0x00000004
+0x000000000010ef98 <bogus+      16>:	0x00000000	0x00000000	0x00010094	0x00000005
+0x000000000010efa8 <bogus+      32>:	0xf010efc8	0xf0100106	0x00000004	0x00000005
+0x000000000010efb8 <bogus+      48>:	0x00000000	0x00000000	0x00000000	0x00010094
+0x000000000010efc8 <bogus+      64>:	0xf010eff8	0xf01001cd	0x00000005	0x00000001
+0x000000000010efd8 <bogus+      80>:	0x00000003	0x00000004	0x00000000	0x00000000
+0x000000000010efe8 <bogus+      96>:	0x00000000	0x00646c72	0x00000000	0x00000000
+0x000000000010eff8 <bogus+     112>:	0x00000000	0xf010003d	0x00000000	0x00000000
+<bochs:11> c
+(0) Breakpoint 1, 0x00000000001000e0 in ?? ()
+Next at t=153867544
+(0) [0x00000000001000e0] 0008:00000000f01000e0 (unk. ctxt): push ebx                  ; 53
+<bochs:12> r
+rax: 0x00000000:00000002 rcx: 0x00000000:000003d5
+rdx: 0x00000000:000003d5 rbx: 0x00000000:00000003
+rsp: 0x00000000:f010ef68 rbp: 0x00000000:f010ef68
+rsi: 0x00000000:00010094 rdi: 0x00000000:0000ffac
+r8 : 0x00000000:00000000 r9 : 0x00000000:00000000
+r10: 0x00000000:00000000 r11: 0x00000000:00000000
+r12: 0x00000000:00000000 r13: 0x00000000:00000000
+r14: 0x00000000:00000000 r15: 0x00000000:00000000
+rip: 0x00000000:f01000e0
+eflags 0x00000006: id vip vif ac vm rf nt IOPL=0 of df if tf sf zf af PF cf
+<bochs:13> x /32dx 0x10ef68
+[bochs]:
+0x000000000010ef68 <bogus+       0>:	0xf010ef88	0xf0100106	0x00000002	0x00000003
+0x000000000010ef78 <bogus+      16>:	0xf010efa8	0x00000000	0xf0100a09	0x00000004
+0x000000000010ef88 <bogus+      32>:	0xf010efa8	0xf0100106	0x00000003	0x00000004
+0x000000000010ef98 <bogus+      48>:	0x00000000	0x00000000	0x00010094	0x00000005
+0x000000000010efa8 <bogus+      64>:	0xf010efc8	0xf0100106	0x00000004	0x00000005
+0x000000000010efb8 <bogus+      80>:	0x00000000	0x00000000	0x00000000	0x00010094
+0x000000000010efc8 <bogus+      96>:	0xf010eff8	0xf01001cd	0x00000005	0x00000001
+0x000000000010efd8 <bogus+     112>:	0x00000003	0x00000004	0x00000000	0x00000000
+<bochs:14> c
+(0) Breakpoint 1, 0x00000000001000e0 in ?? ()
+Next at t=153870681
+(0) [0x00000000001000e0] 0008:00000000f01000e0 (unk. ctxt): push ebx                  ; 53
+<bochs:15> r
+rax: 0x00000000:00000001 rcx: 0x00000000:000003d5
+rdx: 0x00000000:000003d5 rbx: 0x00000000:00000002
+rsp: 0x00000000:f010ef48 rbp: 0x00000000:f010ef48
+rsi: 0x00000000:00010094 rdi: 0x00000000:0000ffac
+r8 : 0x00000000:00000000 r9 : 0x00000000:00000000
+r10: 0x00000000:00000000 r11: 0x00000000:00000000
+r12: 0x00000000:00000000 r13: 0x00000000:00000000
+r14: 0x00000000:00000000 r15: 0x00000000:00000000
+rip: 0x00000000:f01000e0
+eflags 0x00000002: id vip vif ac vm rf nt IOPL=0 of df if tf sf zf af pf cf
+<bochs:16> x /32dx 0x10ef48
+[bochs]:
+0x000000000010ef48 <bogus+       0>:	0xf010ef68	0xf0100106	0x00000001	0x00000002
+0x000000000010ef58 <bogus+      16>:	0xf010ef88	0x00000000	0xf0100a09	0x00000003
+0x000000000010ef68 <bogus+      32>:	0xf010ef88	0xf0100106	0x00000002	0x00000003
+0x000000000010ef78 <bogus+      48>:	0xf010efa8	0x00000000	0xf0100a09	0x00000004
+0x000000000010ef88 <bogus+      64>:	0xf010efa8	0xf0100106	0x00000003	0x00000004
+0x000000000010ef98 <bogus+      80>:	0x00000000	0x00000000	0x00010094	0x00000005
+0x000000000010efa8 <bogus+      96>:	0xf010efc8	0xf0100106	0x00000004	0x00000005
+0x000000000010efb8 <bogus+     112>:	0x00000000	0x00000000	0x00000000	0x00010094
+<bochs:17> c
+(0) Breakpoint 1, 0x00000000001000e0 in ?? ()
+Next at t=153893361
+(0) [0x00000000001000e0] 0008:00000000f01000e0 (unk. ctxt): push ebx                  ; 53
+<bochs:18> r
+rax: 0x00000000:00000000 rcx: 0x00000000:000003d5
+rdx: 0x00000000:000003d5 rbx: 0x00000000:00000001
+rsp: 0x00000000:f010ef28 rbp: 0x00000000:f010ef28
+rsi: 0x00000000:00010094 rdi: 0x00000000:0000ffac
+r8 : 0x00000000:00000000 r9 : 0x00000000:00000000
+r10: 0x00000000:00000000 r11: 0x00000000:00000000
+r12: 0x00000000:00000000 r13: 0x00000000:00000000
+r14: 0x00000000:00000000 r15: 0x00000000:00000000
+rip: 0x00000000:f01000e0
+eflags 0x00000002: id vip vif ac vm rf nt IOPL=0 of df if tf sf zf af pf cf
+<bochs:19> x /32dx 0x10ef28
+[bochs]:
+0x000000000010ef28 <bogus+       0>:	0xf010ef48	0xf0100106	0x00000000	0x00000001
+0x000000000010ef38 <bogus+      16>:	0xf010ef68	0x00000000	0xf0100a09	0x00000002
+0x000000000010ef48 <bogus+      32>:	0xf010ef68	0xf0100106	0x00000001	0x00000002
+0x000000000010ef58 <bogus+      48>:	0xf010ef88	0x00000000	0xf0100a09	0x00000003
+0x000000000010ef68 <bogus+      64>:	0xf010ef88	0xf0100106	0x00000002	0x00000003
+0x000000000010ef78 <bogus+      80>:	0xf010efa8	0x00000000	0xf0100a09	0x00000004
+0x000000000010ef88 <bogus+      96>:	0xf010efa8	0xf0100106	0x00000003	0x00000004
+0x000000000010ef98 <bogus+     112>:	0x00000000	0x00000000	0x00010094	0x00000005
+

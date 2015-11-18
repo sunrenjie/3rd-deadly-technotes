@@ -1,0 +1,139 @@
+I577ce0c0: New exception when auth_url is not specified
+
+Commit message:
+New exception when auth_url is not specified
+
+Certain scenarios into the neutron client will not specify the
+auth_url. This is typically when a token is specified. However, when
+the token is expired the neutron client will attempt to refresh the
+token. Users of this may not have passed in all of the required
+information for this reauthentication to properly occur.
+
+This code fixes an error that occurs in this flow where the auth_url
+(which is None) is appended to another string. This results in a core
+Python error.
+
+The update will provide a more targetted error message specifying to
+the user that the auth_url needs to be specified. An associated unit
+test is also included to validate this behavior.
+
+Change-Id: I577ce0c009a9a281acdc238d290a22c5e561ff82
+Closes-Bug: #1241275
+
+Diff:
+
+diff --git a/neutronclient/common/exceptions.py b/neutronclient/common/exceptions.py
+index 6e2541a..d7e3848 100644 (file)
+--- a/neutronclient/common/exceptions.py
++++ b/neutronclient/common/exceptions.py
+@@ -151,6 +151,10 @@ class BadInputError(Exception):
+     pass
+ 
+ 
++class NoAuthURLProvided(BadInputError):
++    message = _("auth_url was not provided to the Neutron client")
++
++
+ class Error(Exception):
+     def __init__(self, message=None):
+         super(Error, self).__init__(message)
+Notes:
+1. Here defines the exception class specific to the unexpected circumstance
+   as addressed by the commit message.
+2. The '_()' is a conventional name for the function used for i18n message
+   translation. For the particular example here, the function is exported by:
+3. The message string is previously a docstring comment in patch set 2. Then
+   a comment suggests improvement by making it an error message. A lot can be
+   learnt from such improvement.
+
+neutronclient/common/__init__.py:
+16 import gettext
+17
+18 t = gettext.translation('neutronclient', fallback=True)
+19
+20
+21 def _(msg):
+22     return t.ugettext(msg)
+
+diff --git a/neutronclient/client.py b/neutronclient/client.py
+index 3a153b0..448a9c5 100644 (file)
+--- a/neutronclient/client.py
++++ b/neutronclient/client.py
+@@ -228,6 +228,9 @@ class HTTPClient(httplib2.Http):
+                               'password': self.password, },
+                              'tenantName': self.tenant_name, }, }
+ 
++        if self.auth_url is None:
++            raise exceptions.NoAuthURLProvided()
++
+         token_url = self.auth_url + "/tokens"
+ 
+         # Make sure we follow redirects when trying to reach Keystone
+@@ -252,6 +255,9 @@ class HTTPClient(httplib2.Http):
+         self._extract_service_catalog(resp_body)
+ 
+     def _get_endpoint_url(self):
++        if self.auth_url is None:
++            raise exceptions.NoAuthURLProvided()
++
+         url = self.auth_url + '/tokens/%s/endpoints' % self.auth_token
+         try:
+             resp, body = self._cs_request(url, "GET")
+
+Notes:
+1. Such code can only be inserted upon bugfixes: such exceptions must have
+   been rare or even considered impossible until it really happens. Commit
+   messages properly accounting such details are very important to read such
+   code. That's why proper patching techniques and commit messages are so
+   important.
+
+diff --git a/neutronclient/tests/unit/test_auth.py b/neutronclient/tests/unit/test_auth.py
+index ddbf268..b81d236 100644 (file)
+--- a/neutronclient/tests/unit/test_auth.py
++++ b/neutronclient/tests/unit/test_auth.py
+@@ -148,6 +148,33 @@ class CLITestAuthKeystone(testtools.TestCase):
+         self.mox.ReplayAll()
+         self.client.do_request('/resource', 'GET')
+ 
++    def test_refresh_token_no_auth_url(self):
++        self.mox.StubOutWithMock(self.client, "request")
++        self.client.auth_url = None
++
++        self.client.auth_token = TOKEN
++        self.client.endpoint_url = ENDPOINT_URL
++
++        res401 = self.mox.CreateMock(httplib2.Response)
++        res401.status = 401
++
++        # If a token is expired, neutron server returns 401
++        self.client.request(
++            mox.StrContains(ENDPOINT_URL + '/resource'), 'GET',
++            headers=mox.ContainsKeyValue('X-Auth-Token', TOKEN)
++        ).AndReturn((res401, ''))
++        self.mox.ReplayAll()
++        self.assertRaises(exceptions.NoAuthURLProvided,
++                          self.client.do_request,
++                          '/resource',
++                          'GET')
++
++    def test_get_endpoint_url_with_invalid_auth_url(self):
++        # Handle the case when auth_url is not provided
++        self.client.auth_url = None
++        self.assertRaises(exceptions.NoAuthURLProvided,
++                          self.client._get_endpoint_url)
++
+     def test_get_endpoint_url(self):
+         self.mox.StubOutWithMock(self.client, "request")
+
+Notes:
+1. These two newly added test cases address the two circumstances when
+   the user refreshes token or gets end point url with no auth_url
+   provided, cooresponding to exceptions-raising added in
+   neutronclient/client.py above.
+2. The code is still inadequate. The function name plus the comment of
+   the second one is misleading: the exception is auth_url being not
+   provided rather than being invalid. Also, the two cases are treated
+   inequally without obvious reasons. Chances are that the author has
+   made great effort to come up with the prototype, yet somehow failed
+   or forgot to improve it.
+3. Testing by mox (pymox for python) is new to us. A lot more to learn.

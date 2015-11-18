@@ -1,0 +1,214 @@
+commit 23037823adbbf0bfc9c6398e8d460e84d49e4e6f
+Author: Paul Michali <pcm@cisco.com>
+Date:   Fri Mar 14 15:21:03 2014 +0000
+
+    VPNaaS support for VPN service admin state change and reporting
+    
+    For VPN service admin state changes, hook up the API call to the service
+    driver so that the configuration changes can be applied.
+    
+    Modify the status reporting, so that the VPN service and IPSec
+    connection status' match the actual status when admin state down
+    actions are performed (on both the service and connection).
+    
+    Change-Id: Ife7176675d20bb3ea529a4d79fa92a61f9550a6a
+    Closes-Bug: 1291609
+
+Notes:
+1. This change enables syncing of VPN service admin state changes by picking
+   now nonexisting, yet previously existing info from cache. The syncing is
+   enabled for both server side and device driver side.
+
+---
+ neutron/services/vpn/device_drivers/ipsec.py                              | 22 +++++++++++++++++++++-
+ + Added a new method IPsecDriver.update_downed_connections() which, deduced
+   from usage and doc rather than definition, for connections that just went
+   down, update the status as DOWN and updated_pending_status as True, so that
+   report_status() can get more complete info.
+ + [change to IPsecDriver.report_status()] Previously, the list of status
+   passed to self.agent_rpc.update_status() contains all processes for which
+   is_status_updated() is true. This does not include ipsec_site_connections
+   that just went down. Now IPsecDriver.update_downed_connections() is called
+   to collect them and mark as status=DOWN and updated_pending_status=True.
+   When self.agent_rpc.update_status() is called, admin state changes will be
+   reflected to service side.
+ neutron/services/vpn/device_drivers/template/openswan/ipsec.conf.template |  2 +-
+ + From jinja2 template for ipsec.conf removed ipsec_site_connection info for
+   those with admin state up is false. This is device driver side update
+   reflecting admin state change.
+ neutron/services/vpn/plugin.py                                            |  9 +++++++++
+ + Added a new method VPNDriverPlugin.update_vpnservice().
+ neutron/tests/unit/services/vpn/device_drivers/test_ipsec.py              | 66 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ neutron/tests/unit/services/vpn/test_vpnaas_driver_plugin.py              |  5 +++++
+ 5 files changed, 102 insertions(+), 2 deletions(-)
+
+diff --git a/neutron/services/vpn/device_drivers/ipsec.py b/neutron/services/vpn/device_drivers/ipsec.py
+index cdf9c58..90e95c9 100644
+--- a/neutron/services/vpn/device_drivers/ipsec.py
++++ b/neutron/services/vpn/device_drivers/ipsec.py
+@@ -77,6 +77,8 @@ STATUS_MAP = {
+     'unrouted': constants.DOWN
+ }
+ 
++IPSEC_CONNS = 'ipsec_site_connections'
++
+ 
+ def _get_template(template_file):
+     global JINJA_ENV
+@@ -622,14 +624,32 @@ class IPsecDriver(device_drivers.DeviceDriver):
+             'ipsec_site_connections': copy.deepcopy(process.connection_status)
+         }
+ 
++    def update_downed_connections(self, process_id, new_status):
++        """Update info to be reported, if connections just went down.
++
++        If there is no longer any information for a connection (because it
++        has been removed (e.g. due to an admin down of VPN service or IPSec
++        connection), but there was previous status information for the
++        connection, mark the connection as down for reporting purposes.
++        """
++        if process_id in self.process_status_cache:
++            for conn in self.process_status_cache[process_id][IPSEC_CONNS]:
++                if conn not in new_status[IPSEC_CONNS]:
++                    new_status[IPSEC_CONNS][conn] = {
++                        'status': constants.DOWN,
++                        'updated_pending_status': True
++                    }
++
+     def report_status(self, context):
+         status_changed_vpn_services = []
+         for process in self.processes.values():
+             previous_status = self.get_process_status_cache(process)
+             if self.is_status_updated(process, previous_status):
+                 new_status = self.copy_process_status(process)
+-                self.process_status_cache[process.id] = new_status
++                self.update_downed_connections(process.id, new_status)
+                 status_changed_vpn_services.append(new_status)
++                self.process_status_cache[process.id] = (
++                    self.copy_process_status(process))
+                 # We need unset updated_pending status after it
+                 # is reported to the server side
+                 self.unset_updated_pending_status(process)
+diff --git a/neutron/services/vpn/device_drivers/template/openswan/ipsec.conf.template b/neutron/services/vpn/device_drivers/template/openswan/ipsec.conf.template
+index 180b4a1..546e27e 100644
+--- a/neutron/services/vpn/device_drivers/template/openswan/ipsec.conf.template
++++ b/neutron/services/vpn/device_drivers/template/openswan/ipsec.conf.template
+@@ -6,7 +6,7 @@ conn %default
+     ikelifetime=480m
+     keylife=60m
+     keyingtries=%forever
+-{% for ipsec_site_connection in vpnservice.ipsec_site_connections
++{% for ipsec_site_connection in vpnservice.ipsec_site_connections if ipsec_site_connection.admin_state_up
+ %}conn {{ipsec_site_connection.id}}
+     # NOTE: a default route is required for %defaultroute to work...
+     left={{vpnservice.external_ip}}
+diff --git a/neutron/services/vpn/plugin.py b/neutron/services/vpn/plugin.py
+index 1a128da..771188d 100644
+--- a/neutron/services/vpn/plugin.py
++++ b/neutron/services/vpn/plugin.py
+@@ -91,6 +91,15 @@ class VPNDriverPlugin(VPNPlugin, vpn_db.VPNPluginRpcDbMixin):
+             context, old_ipsec_site_connection, ipsec_site_connection)
+         return ipsec_site_connection
+ 
++    def update_vpnservice(self, context, vpnservice_id, vpnservice):
++        old_vpn_service = self.get_vpnservice(context, vpnservice_id)
++        new_vpn_service = super(
++            VPNDriverPlugin, self).update_vpnservice(context, vpnservice_id,
++                                                     vpnservice)
++        driver = self._get_driver_for_vpnservice(old_vpn_service)
++        driver.update_vpnservice(context, old_vpn_service, new_vpn_service)
++        return new_vpn_service
++
+     def delete_vpnservice(self, context, vpnservice_id):
+         vpnservice = self._get_vpnservice(context, vpnservice_id)
+         super(VPNDriverPlugin, self).delete_vpnservice(context, vpnservice_id)
+diff --git a/neutron/tests/unit/services/vpn/device_drivers/test_ipsec.py b/neutron/tests/unit/services/vpn/device_drivers/test_ipsec.py
+index bbd6592..c7bc4d7 100644
+--- a/neutron/tests/unit/services/vpn/device_drivers/test_ipsec.py
++++ b/neutron/tests/unit/services/vpn/device_drivers/test_ipsec.py
+@@ -190,3 +190,69 @@ class TestIPsecDeviceDriver(base.BaseTestCase):
+         process_id = _uuid()
+         self.driver.sync(context, [{'id': process_id}])
+         self.assertNotIn(process_id, self.driver.processes)
++
++    def test_status_updated_on_connection_admin_down(self):
++        self.driver.process_status_cache = {
++            '1': {
++                'status': constants.ACTIVE,
++                'id': 123,
++                'updated_pending_status': False,
++                'ipsec_site_connections': {
++                    '10': {
++                        'status': constants.ACTIVE,
++                        'updated_pending_status': False,
++                    },
++                    '20': {
++                        'status': constants.ACTIVE,
++                        'updated_pending_status': False,
++                    }
++                }
++            }
++        }
++        # Simulate that there is no longer status for connection '20'
++        # e.g. connection admin down
++        new_status = {
++            'ipsec_site_connections': {
++                '10': {
++                    'status': constants.ACTIVE,
++                    'updated_pending_status': False
++                }
++            }
++        }
++        self.driver.update_downed_connections('1', new_status)
++        existing_conn = new_status['ipsec_site_connections'].get('10')
++        self.assertIsNotNone(existing_conn)
++        self.assertEqual(constants.ACTIVE, existing_conn['status'])
++        missing_conn = new_status['ipsec_site_connections'].get('20')
++        self.assertIsNotNone(missing_conn)
++        self.assertEqual(constants.DOWN, missing_conn['status'])
++
++    def test_status_updated_on_service_admin_down(self):
++        self.driver.process_status_cache = {
++            '1': {
++                'status': constants.ACTIVE,
++                'id': 123,
++                'updated_pending_status': False,
++                'ipsec_site_connections': {
++                    '10': {
++                        'status': constants.ACTIVE,
++                        'updated_pending_status': False,
++                    },
++                    '20': {
++                        'status': constants.ACTIVE,
++                        'updated_pending_status': False,
++                    }
++                }
++            }
++        }
++        # Simulate that there are no connections now
++        new_status = {
++            'ipsec_site_connections': {}
++        }
++        self.driver.update_downed_connections('1', new_status)
++        missing_conn = new_status['ipsec_site_connections'].get('10')
++        self.assertIsNotNone(missing_conn)
++        self.assertEqual(constants.DOWN, missing_conn['status'])
++        missing_conn = new_status['ipsec_site_connections'].get('20')
++        self.assertIsNotNone(missing_conn)
++        self.assertEqual(constants.DOWN, missing_conn['status'])
+diff --git a/neutron/tests/unit/services/vpn/test_vpnaas_driver_plugin.py b/neutron/tests/unit/services/vpn/test_vpnaas_driver_plugin.py
+index f5ed5bc..45f932e 100644
+--- a/neutron/tests/unit/services/vpn/test_vpnaas_driver_plugin.py
++++ b/neutron/tests/unit/services/vpn/test_vpnaas_driver_plugin.py
+@@ -58,6 +58,11 @@ class TestVPNDriverPlugin(test_db_vpnaas.TestVpnaas,
+         self.driver.delete_vpnservice.assert_called_once_with(
+             mock.ANY, mock.ANY)
+ 
++    def test_update_vpnservice(self, **extras):
++        super(TestVPNDriverPlugin, self).test_update_vpnservice()
++        self.driver.update_vpnservice.assert_called_once_with(
++            mock.ANY, mock.ANY, mock.ANY)
++
+     @contextlib.contextmanager
+     def vpnservice_set(self):
+         """Test case to create a ipsec_site_connection."""

@@ -1,0 +1,8 @@
+layout asm
+c/continue
+disassemble 0x7c00,+30
+step
+stepi/si
+display/3i $pc
+x /10x 0x7c00
+x /100b 0x7c00

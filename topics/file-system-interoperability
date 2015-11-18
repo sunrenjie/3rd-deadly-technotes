@@ -1,0 +1,51 @@
+On File System Interoperability
+
+We use different types of file systems in different operating systems.
+Routine data exchange among them raises the problem of interoperability. In
+one of the worst catastrophe recently, writing a FAT partition by Mac OS X
+resulted in deleting of one huge (>500GB) NTFS partition, on which majority
+of our data is stored. In minor cases, writing of NTFS partitions by Linux
+resulted in data loss and/or file system error.
+
+These disasters urge us to work out some SOPs on exchanging data on the
+various file systems. To be brief, in order to ensure maximum safely, we shall
+only write to file systems for which native support is available,
+except with good reasons. Read support shall be deployed as much as possible
+to help us figure out workaround solutions when there is a need to write to
+file systems without native support.
+
+When is support for some file system native? Its OS vendor invented it,
+shipped it in the OS (and hence having tested it extremely heavily behind the
+scene), held relevant patents around it (if there is any).
+
+Here are the detailed Does and Don'ts:
+
+File System    Windows    Linux    Mac OS X
+NTFS           RW         RO [1]   RO
+FAT*           RW         RO [1]   RO [1]
+ext2/3/4       RO [2]     RW       NA
+Apple HPFS     RO [3]     RO [1]   RW
+
+Notes: Reference OS'es are XP/7 for Windows, Fedora 20/21 x86_64 for Linux,
+Mac OS X 10.9. Abbreviations: 'RW' for native read/write support (we forbid
+non-native write anyway), 'RO' for read only, 'NA' for unavailable (even if
+commecial solutions are available). Reading support for all file systems as
+listed are available in Windows, meaning that Windows/NTFS is the ideal
+combination to manipulate/store our data, while Windows/FAT may seems better
+for small-capacity USB thumb drives or SD/TF cards.
+
+Also:
+[1] Official yet not native write support may trick us to use it and hurt us.
+    Always disabled it. Majority of data/file system corruption happens in
+    such cases.
+[2] Read only support is available via third-party software ext2fsd.
+[3] Read only support is available via Apple bootcamp or third-party software
+    HFSExplorer.
+
+* There are several FAT variants: FAT/FAT32/exFAT, etc. Now that they are
+  under similar situations in our discussion, we don't bother to distinguish
+  among them.
+
+Once again, always disable write for non-native support. If there is absolute
+necessity, give remote file system (say, NFS) a try.
+

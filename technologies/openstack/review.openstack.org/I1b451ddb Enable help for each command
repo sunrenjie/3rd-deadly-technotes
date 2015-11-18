@@ -1,0 +1,98 @@
+Change I1b451ddb: Enable --help for each command
+
+URL: https://review.openstack.org/#/c/77380/
+
+Commit message:
+Enable --help for each command
+
+Now heat stack-create --help outputs same with heat --help. It should
+output the help message for stack-create instead of the global one.
+
+Change-Id: I1b451ddb4ecba3bb3294ff3219a5ecad394ada9e
+
+Annotated diff for the last patch set (#3):
+diff --git a/heatclient/shell.py b/heatclient/shell.py
+index 4e5444a..b1ee0a9 100644 (file)
+--- a/heatclient/shell.py
++++ b/heatclient/shell.py
+@@ -295,7 +295,7 @@ class HeatShell(object):
+ 
+         # Handle top-level --help/-h before attempting to parse
+         # a command off the command line
+-        if options.help or not argv:
++        if not args and options.help or not argv:
+             self.do_help(options)
+             return 0
+
+Note:
+1. This is the main modification. If the program is invoked as
+   'heat stack-create --help xxx', before executing the statement in question,
+   the relevant variables are:
+   
+(Pdb) p args
+['stack-create', 'xxx']
+(Pdb) p options.help
+True
+(Pdb) p argv
+['stack-create', '--help', 'xxx']
+
+   Previously, the argv is nonempty, we are requested to display help info
+   (options.help == True), then the shell displays its help info and returns.
+   After the mod, such displaying is disabled. The next statements will have
+   command-specific help info displayed.
+2. Methods
+   + git clone https://www.github.com/openstack/python-heatclient.git
+   + cd python-heatclient
+   + cp -r python_heatclient-0.2.4.egg-info .
+     (from debian package python-heatclient)
+   + cp /usr/bin/heat . (from debian package python-heatclient)
+   + env PYTHONPATH=/home/r/src/python-heatclient/ python -m pdb heat.py stack-create --help xxx
+   + (pdb)
+     + tbreak /home/r/src/python-heatclient/heatclient/shell.py:298
+     + c
+     + p args / p options / p argv
+3. Syntax note: The operator precedence rules are such that not >> and >> or.
+   Therefore, 'if not args and options.help or not argv' shall be read as
+   'if (((not args) and options.help) or not argv)'.
+
+diff --git a/heatclient/tests/test_shell.py b/heatclient/tests/test_shell.py
+index 09d114f..cd33c1b 100644 (file)
+--- a/heatclient/tests/test_shell.py
++++ b/heatclient/tests/test_shell.py
+@@ -244,6 +244,7 @@ class ShellBase(TestCase):
+             sys.stdout = six.StringIO()
+             _shell = heatclient.shell.HeatShell()
+             _shell.main(argstr.split())
++            self.subcommands = _shell.subcommands.keys()
+         except SystemExit:
+             exc_type, exc_value, exc_traceback = sys.exc_info()
+             self.assertEqual(0, exc_value.code)
+@@ -273,6 +274,18 @@ class ShellTestCommon(ShellBase):
+             for r in required:
+                 self.assertRegexpMatches(help_text, r)
+ 
++    def test_command_help(self):
++        output = self.shell('help help')
++        self.assertIn('usage: heat help [<subcommand>]', output)
++        subcommands = list(self.subcommands)
++        for command in subcommands:
++            if command.replace('_', '-') == 'bash-completion':
++                continue
++            output1 = self.shell('help %s' % command)
++            output2 = self.shell('%s --help' % command)
++            self.assertEqual(output1, output2)
++            self.assertRegexpMatches(output1, '^usage: heat %s' % command)
++
+     def test_debug_switch_raises_error(self):
+         fakes.script_keystone_client()
+         http.HTTPClient.json_request(
+
+Note:
+1. Here added a testing function for the help displaying functionality. Firstly,
+   all commands are collected as a list and stored in subcommands member, then
+   the two asserts assertEqual and assertRegexpMatches are performed against all
+   elements of the list.
+2. In the patch set 1, the owner did not create a user case test at all, while
+   in the patch set 2, the user case is created in a awkward manner that the
+   list of all commands are hard-coded, which is obviously a bad idea.
+

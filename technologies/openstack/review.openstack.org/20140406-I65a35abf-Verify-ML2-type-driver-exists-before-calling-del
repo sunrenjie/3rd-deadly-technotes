@@ -1,0 +1,93 @@
+commit af89d74d2961db6a04572375150ad908c9e72e78
+Author: Kevin Benton <blak111@gmail.com>
+Date:   Sun Apr 6 04:57:36 2014 -0700
+
+    Verify ML2 type driver exists before calling del
+    
+    Verifies that an ML2 type driver exists for a given
+    segment type before attempting to call the release_segment
+    method on it. Logs an error if a type driver is not
+    found.
+    
+    This covers the case where a segment is created with
+    a given type and then ML2 is reconfigured without
+    support for that type.
+    
+    DocImpact
+    The ML2 documentation should be updated with a warning
+    that disabling a network type driver and re-enabling
+    it later may lead to possible DB inconsistencies.
+    
+    Closes-Bug: #1292102
+    Change-Id: I65a35abf3ed57347bb6e8fee228f8c0697217c00
+
+Notes:
+1. This bug-fix reflects a flaw in design policy that failed to be explicitly
+   mentioned or enforced. Fundamentally, the db and current runtime status are
+   not necessarily synchronous. Their differences shall either be taken into
+   account in almost every espect.
+2. [context] If a ml2 type driver is used to create a segment and then is
+   disabled later, the db info about this segment is left obsolete for which
+   no management (inclue delete) shall be performed. And if any such request
+   is made, properly handling and error reporting is needed.
+3. [summary] The release_segment function is added protection against delete
+   request on behalf of such obsolete info. When such request is made, the db
+   part of delete proceeds as usual, while the type driver part logs the error
+   and simply returns without doing any meaningful job (actually it cannot).
+
+---
+ neutron/plugins/ml2/managers.py           | 10 ++++++++++
+ neutron/tests/unit/ml2/test_ml2_plugin.py | 12 ++++++++++++
+ 2 files changed, 22 insertions(+)
+
+diff --git a/neutron/plugins/ml2/managers.py b/neutron/plugins/ml2/managers.py
+index 7421e4b..a5feb70 100644
+--- a/neutron/plugins/ml2/managers.py
++++ b/neutron/plugins/ml2/managers.py
+@@ -98,6 +98,16 @@ class TypeManager(stevedore.named.NamedExtensionManager):
+     def release_segment(self, session, segment):
+         network_type = segment.get(api.NETWORK_TYPE)
+         driver = self.drivers.get(network_type)
++        # ML2 may have been reconfigured since the segment was created,
++        # so a driver may no longer exist for this network_type.
++        # REVISIT: network_type-specific db entries may become orphaned
++        # if a network is deleted and the driver isn't available to release
++        # the segment. This may be fixed with explicit foreign-key references
++        # or consistency checks on driver initialization.
++        if not driver:
++            LOG.error(_("Failed to release segment '%s' because "
++                        "network type is not supported."), segment)
++            return
+         driver.obj.release_segment(session, segment)
+ 
+ 
+diff --git a/neutron/tests/unit/ml2/test_ml2_plugin.py b/neutron/tests/unit/ml2/test_ml2_plugin.py
+index 408c7ea..da878b4 100644
+--- a/neutron/tests/unit/ml2/test_ml2_plugin.py
++++ b/neutron/tests/unit/ml2/test_ml2_plugin.py
+@@ -25,6 +25,7 @@ from neutron.extensions import providernet as pnet
+ from neutron import manager
+ from neutron.plugins.ml2.common import exceptions as ml2_exc
+ from neutron.plugins.ml2 import config
++from neutron.plugins.ml2 import driver_api
+ from neutron.plugins.ml2 import plugin as ml2_plugin
+ from neutron.tests.unit import _test_extension_portbindings as test_bindings
+ from neutron.tests.unit.ml2.drivers import mechanism_logger as mech_logger
+@@ -289,6 +290,17 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
+         res = network_req.get_response(self.api)
+         self.assertEqual(res.status_int, 400)
+ 
++    def test_release_segment_no_type_driver(self):
++        segment = {driver_api.NETWORK_TYPE: 'faketype',
++                   driver_api.PHYSICAL_NETWORK: 'physnet1',
++                   driver_api.ID: 1}
++        with mock.patch('neutron.plugins.ml2.managers.LOG') as log:
++            self.driver.type_manager.release_segment(session=None,
++                                                     segment=segment)
++        log.error.assert_called_once_with(
++            "Failed to release segment '%s' because "
++            "network type is not supported.", segment)
++
+     def test_create_provider_fail(self):
+         segment = {pnet.NETWORK_TYPE: None,
+                    pnet.PHYSICAL_NETWORK: 'phys_net',

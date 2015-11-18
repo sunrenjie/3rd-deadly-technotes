@@ -1,0 +1,22 @@
+
+How to get v1ch10/WebStartCalculator working?
+
+# compilation and create jar archive
+javac -cp /home/r/bin/jdk1.7.0_67/jre/lib/javaws.jar:. WebStartCalculator.java
+jar cvfm Calculator.jar WebStartCalculator.mf *.class *.png
+
+# deploy
+mkdir -vp /home/r/bin/apache-tomcat-8.0.23/webapps/calculator/WEB-INF
+cp *.jar *.jnlp /home/r/bin/apache-tomcat-8.0.23/webapps/calculator/
+
+# create web.xml
+<?xml version="1.0" encoding="utf-8"?>
+<web-app version="2.5" xmlns="http://java.sun.com/xml/ns/j2ee"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://java.sun.com/xml/ns/j2ee
+  http://java.sun.com/xml/ns/j2ee/web-app_2_5.xsd">
+</web-app>
+
+# start tomcat and open the url in browser:
+http://localhost:8080/calculator/WebStartCalculator.jnlp
+

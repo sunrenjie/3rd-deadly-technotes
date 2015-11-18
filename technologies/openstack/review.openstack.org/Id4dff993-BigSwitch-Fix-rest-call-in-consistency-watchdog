@@ -1,0 +1,115 @@
+Change Id4dff993: BigSwitch: Fix rest call in consistency watchdog
+
+Commit message:
+BigSwitch: Fix rest call in consistency watchdog
+
+Fixes the rest call in the consistency watchdog
+in the BigSwitch plugin that was causing it to
+raise an exception.
+
+Closes-Bug: #1289138
+Change-Id: Id4dff993426573be6984eb1e8f6ef2aabfff0779
+
+Notes:
+1. This is the pilot change that represents a breakthrough that better toolsets
+   are used to understand and verify known good python code.
+
+Diff:
+diff --git a/neutron/plugins/bigswitch/servermanager.py b/neutron/plugins/bigswitch/servermanager.py
+index 2ef0da1..e482466 100644 (file)
+--- a/neutron/plugins/bigswitch/servermanager.py
++++ b/neutron/plugins/bigswitch/servermanager.py
+@@ -552,7 +552,7 @@ class ServerPool(object):
+             # doesn't match, the backend will return a synchronization error
+             # that will be handled by the rest_call.
+             time.sleep(polling_interval)
+-            self.servers.rest_call('GET', HEALTH_PATH)
++            self.rest_call('GET', HEALTH_PATH)
+ 
+ 
+ class HTTPSConnectionWithValidation(httplib.HTTPSConnection):
+diff --git a/neutron/tests/unit/bigswitch/test_servermanager.py b/neutron/tests/unit/bigswitch/test_servermanager.py
+index 569a98b..f7dc481 100644 (file)
+--- a/neutron/tests/unit/bigswitch/test_servermanager.py
++++ b/neutron/tests/unit/bigswitch/test_servermanager.py
+@@ -14,6 +14,7 @@
+ #
+ # @author: Kevin Benton, kevin.benton@bigswitch.com
+ #
++from contextlib import nested
+ import mock
+ from oslo.config import cfg
+ 
+@@ -21,6 +22,8 @@ from neutron.manager import NeutronManager
+ from neutron.plugins.bigswitch import servermanager
+ from neutron.tests.unit.bigswitch import test_restproxy_plugin as test_rp
+ 
++SERVERMANAGER = 'neutron.plugins.bigswitch.servermanager'
++
+ 
+ class ServerManagerTests(test_rp.BigSwitchProxyPluginV2TestCase):
+ 
+@@ -45,3 +48,23 @@ class ServerManagerTests(test_rp.BigSwitchProxyPluginV2TestCase):
+                 *('example.org', 443)
+             )
+             sslgetmock.assert_has_calls([mock.call(('example.org', 443))])
++
++    def test_consistency_watchdog(self):
++        pl = NeutronManager.get_plugin()
++        pl.servers.capabilities = []
++        self.watch_p.stop()
++        with nested(
++            mock.patch('time.sleep'),
++            mock.patch(
++                SERVERMANAGER + '.ServerPool.rest_call',
++                side_effect=servermanager.RemoteRestError(
++                    reason='Failure to break loop'
++                )
++            )
++        ) as (smock, rmock):
++            # should return immediately without consistency capability
++            pl.servers._consistency_watchdog()
++            self.assertFalse(smock.called)
++            pl.servers.capabilities = ['consistency']
++            self.assertRaises(servermanager.RemoteRestError,
++                              pl.servers._consistency_watchdog)
+
+Comments:
+1. The context of this change can be verified by applying changes to the test
+   code and NOT changes to the code being tested, then running the tests:
+   $ testr run neutron.tests.unit.bigswitch.test_servermanager.*
+      Traceback (most recent call last):
+      File "neutron/tests/unit/bigswitch/test_servermanager.py", line 70, in test_consistency_watchdog
+        pl.servers._consistency_watchdog)
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/testcase.py", line 393, in assertRaises
+        self.assertThat(our_callable, matcher)
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/testcase.py", line 404, in assertThat
+        mismatch_error = self._matchHelper(matchee, matcher, message, verbose)
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/testcase.py", line 454, in _matchHelper
+        mismatch = matcher.match(matchee)
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/matchers/_exception.py", line 108, in match
+        mismatch = self.exception_matcher.match(exc_info)
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/matchers/_higherorder.py", line 62, in match
+        mismatch = matcher.match(matchee)
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/testcase.py", line 385, in match
+        reraise(*matchee)
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/matchers/_exception.py", line 101, in match
+        result = matchee()
+      File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/testtools/testcase.py", line 902, in __call__
+        return self._callable_object(*self._args, **self._kwargs)
+      File "neutron/plugins/bigswitch/servermanager.py", line 555, in _consistency_watchdog
+        self.servers.rest_call('GET', HEALTH_PATH)
+      AttributeError: 'list' object has no attribute 'rest_call'
+   Turned out that this is a simple typo of function call: self.servers is a
+   list and the attribute self.server.rest_call does not exist at all. Rather,
+   the call shall be made to self.rest_all() instead. This commit is making
+   precisely this change.
+2. Basically, the test code uses mock to patch the class to return a predefined
+   exception, then asserts that such exception is indeed raised by call to
+   _consistency_watchdog(). Hence the passing of the test indeed verifies that
+   the call is performed as expected.
+3. The testing code uses contextlib.nested to keep multiple variables in with-
+   statement.
+4. Suspiciously, the new test function introduced a variable 'rmock' that is
+   never used, which is reported by pydev. Maybe this is the way.
+

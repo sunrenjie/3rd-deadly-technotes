@@ -1,0 +1,10 @@
+Input method at GNU/Linux @ 20141218
+
+==============
+fcitx specific
+
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS="@im=fcitx"
+fcitx 1>/dev/null 2>/dev/null
+

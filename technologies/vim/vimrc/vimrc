@@ -1,0 +1,12 @@
+syntax on
+set hlsearch
+set colorcolumn=80
+set number
+"set textwidth=79
+if has("autocmd")
+  au BufReadPost * if line("'\"") > 1 && line("'\"") <= line("$") | exe "normal! g'\"" | endif
+endif
+
+set autoindent
+set smartindent
+

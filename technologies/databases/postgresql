@@ -1,0 +1,5 @@
+postgresql:
+\dt ≃ show tables
+\l ≃ show databases
+\o out.txt
+

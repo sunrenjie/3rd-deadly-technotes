@@ -1,0 +1,247 @@
+
+Mar 5, 2012
+
+Miscellaneous details about 80386 memory management
+
+1. selector portion of logical address
+
+The 13 most significant bits of the 16-bit selector is defined as index into the
+descriptor table, while the 2 least significant bits are for request privilege
+level (RPL), leaving 1 bit for table indicator (TI):
+
+                         15                      4 3   0
+                        +-------------------------+-+---+
+                        |                         |T|   |
+                        |           INDEX         | |RPL|
+                        |                         |I|   |
+                        +-------------------------+-+---+
+
+                         TI  - TABLE INDICATOR (0 for GDT, 1 for current LDT)
+                         RPL - REQUESTOR'S PRIVILEGE LEVEL
+
+The first entry of the GDT is null. A zero selector (with an index of zero
+and TI of zero) points to this null GDT entry. Using zero selector to access
+memory will cause an exception.
+
+In boot/boot.S, 3 selectors are defined:
+      3 .set PROT_MODE_CSEG,0x8         # code segment selector
+      4 .set PROT_MODE_DSEG,0x10        # data segment selector
+     ..
+     92                 .p2align 2                      # force 4 byte alignment
+     93 gdt:            SEG_NULL                                # null seg
+     94                 SEG(STA_X|STA_R, 0x0, 0xffffffff)       # code seg
+     95                 SEG(STA_W, 0x0, 0xffffffff)             # data seg
+     96         
+     97 gdtdesc:        .word   0x17                    # sizeof(gdt) - 1
+     98                 .long   gdt                     # address gdt
+
+Note:
++ sizeof descriptor table entry is 0x8.
++ these selectors are defined as multiple of 0x8, with 3 lsb being 0, which
+  implies TI=0 (GDT is referenced) and RPL=0 (for kernel).
++ the index of these selectors will be 0x0, 0x1, 0x2, respectively.
+
+2. @ inc/memlayout.h (over 386 mmu)
+
+     90 // Virtual page table.  Entry PDX[VPT] in the PD contains a pointer to
+     91 // the page directory itself, thereby turning the PD into a page table,
+     92 // which maps all the PTEs containing the page mappings for the entire
+     93 // virtual address space into that 4 Meg region starting at VPT.
+     94 #define VPT             (KERNBASE - PTSIZE)
+     95 #define KSTACKTOP       VPT
+     96 #define KSTKSIZE        (8*PGSIZE)              // size of a kernel stack
+     97 #define ULIM            (KSTACKTOP - PTSIZE) 
+
+For each and every page table located in page boundary (there's no reason not
+to do so), the address will be multiple of 0x4000, which means that the least
+significant 12 bits are zeros. For page table located at 4M boundaries
+like vpt(0xf0000000 - 0x00400000 = 0xefc00000), the least significant 22 bits
+of the address are zeroes, which means that this virtual address will be
+referenced as the first address of the first page table of some page directory.
+Consider the fact that page directories and page tables are themselves pages,
+therefore, it becomes possible (as in this case) that THE page directory defines
+an entry that points to itself. (We use the word 'THE' because only one page
+table is required to map the entire i386 virtual address space.) Therefore, it
+is beneficial to define page table at 4M boundaries (or PTSIZE).
+
+For every resizable segment (stack), an invalid memory or empty memory is used
+to protect it from overwriting other data structures. The kernel stack has a
+invalid memory of (PTSIZE - 8*PGSIZE).
+
+3. @ inc/memlayout.h (over "programmer's license")
+
+With the help of inc/queue.h:
+    108  */
+    109 #define LIST_HEAD(name, type)                                           \
+    110 struct name {                                                           \
+    111         struct type *lh_first;  /* first element */                     \
+    112 }
+    ...
+    129 #define LIST_ENTRY(type)                                                \
+    130 struct {                                                                \
+    131         struct type *le_next;   /* next element */                      \
+    132         struct type **le_prev;  /* ptr to ptr to this element */        \
+    133 }
+
+The code @ inc/memlayout.h:
+      6 #include <inc/queue.h>
+    ...
+    166 LIST_HEAD(Page_list, Page);
+    167 typedef LIST_ENTRY(Page) Page_LIST_entry_t;
+    168 
+    169 struct Page {
+    170         Page_LIST_entry_t pp_link;      /* free list link */
+    171 
+    172         // pp_ref is the count of pointers (usually in page table entries)
+    173         // to this page, for pages allocated using page_alloc.
+    174         // Pages allocated at boot time using pmap.c's
+    175         // boot_alloc do not have valid reference count fields.
+    176 
+    177         uint16_t pp_ref;
+    178 };
+
+will expand to:
+struct Page_list {
+	structu Page * lh_first;
+};
+
+struct Page {
+	struct {
+		struct Page * le_next;
+		struct Page ** le_prev;
+	} pp_link;
+	uint16_t pp_ref;
+};
+
+Note the usage of ';' in inc/queue.h and inc/memlayout.h respectively.
+I'm glad that inc/queue.h is from BSD.
+
+I'm wondering why would Page.pp_ref not be defined as uint32_t instead of
+uint16_t. Though I must confess that this is more memory efficient:
+sizeof(struct Page) == 12.
+
+4. page-level protection (20120310)
+
+Here are excerpts from "80386 Programmer's Reference Manual":
+5.2.4.4 Read/Write and User/Supervisor Bits
+These bits are not used for address translation, but are used for page-level
+protection, which the processor performs at the same time as address
+translation. Refer to Chapter 6 where protection is discussed in detail.
+
+6.4.1.1 Restricting Addressable Domain
+The concept of privilege for pages is implemented by assigning each page to one
+of two levels:
+
+   1. Supervisor level (U/S=0) -- for the operating system and other systems
+      software and related data.
+   2. User level (U/S=1) -- for applications procedures and data. 
+
+The current level (U or S) is related to CPL. If CPL is 0, 1, or 2, the
+processor is executing at supervisor level. If CPL is 3, the processor is
+executing at user level.
+
+When the processor is executing at supervisor level, all pages are addressable,
+but, when the processor is executing at user level, only pages that belong to
+the user level are addressable.
+
+6.4.1.2 Type Checking
+At the level of page addressing, two types are defined:
+
+   1. Read-only access (R/W=0)
+   2. Read/write access (R/W=1)
+
+When the processor is executing at supervisor level, all pages are both readable
+and writable. When the processor is executing at user level, only pages that
+belong to user level and are marked for read/write access are writable; pages
+that belong to supervisor level are neither readable nor writable from user
+level.
+
+6.4.2 Combining Protection of Both Levels of Page Tables
+For any one page, the protection attributes of its page directory entry may
+differ from those of its page table entry. The 80386 computes the effective
+protection attributes for a page by examining the protection attributes in both
+the directory and the page table. Table 6-5 shows the effective protection
+provided by the possible combinations of protection attributes. 
+
+Table 6-5. Combining Directory and Page Protection
+
+Page Directory Entry     Page Table Entry      Combined Protection
+U/S          R/W         U/S      R/W          U/S         R/W
+
+S-0          R-0         S-0      R-0           S           x
+S-0          R-0         S-0      W-1           S           x
+S-0          R-0         U-1      R-0           S           x
+S-0          R-0         U-1      W-1           S           x
+S-0          W-1         S-0      R-0           S           x
+S-0          W-1         S-0      W-1           S           x
+S-0          W-1         U-1      R-0           S           x
+S-0          W-1         U-1      W-1           S           x
+U-1          R-0         S-0      R-0           S           x
+U-1          R-0         S-0      W-1           S           x
+U-1          R-0         U-1      R-0           U           R
+U-1          R-0         U-1      W-1           U           R
+U-1          W-1         S-0      R-0           S           x
+U-1          W-1         S-0      W-1           S           x
+U-1          W-1         U-1      R-0           U           R
+U-1          W-1         U-1      W-1           U           W
+
+Note
+
+S -- Supervisor
+R -- Read only
+U -- User
+W -- Read and Write
+x indicates that when the combined U/S attribute is S, the R/W attribute
+is not checked.
+
+I'm confused by two points:
+1. <inc/memlayout.h> states that ROPAGES will be mapped R/O attribute for both
+   kernel and user. Yet according to the manual, for pages owned by the kernel,
+   kernel have R/W acess without checking the R/W attribute.
+2. Still on ROPAGES: how can you specifiy attribute for BOTH the kernel and
+   user, when one page have to be owned by either user or kernel.
+
+For now We'll code according to Intel's specs and silently ignore those comments
+in the JOS code that contradicts with what Intel have said.
+
+UPDATES: I am glad that I wrote the above since I noticed the problem correctly
+based on the particular knowledge I had in mind at as writing. We now know that
+486 and later CPUs introduced a Write protect(MP) bit at cr0, which, when set,
+prevents the kernel code from writing to pages marked read-only.
+
+5. @ inc/memlayout.h (over page dir pointing to itself)
+inc/memlayout.h:
+    137 /*
+    138  * The page directory entry corresponding to the virtual address range
+    139  * [VPT, VPT + PTSIZE) points to the page directory itself.  Thus, the page
+    140  * directory is treated as a page table as well as a page directory.
+    141  *
+    142  * One result of treating the page directory as a page table is that all PTEs
+    143  * can be accessed through a "virtual page table" at virtual address VPT (to
+    144  * which vpt is set in entry.S).  The PTE for page number N is stored in
+    145  * vpt[N].  (It's worth drawing a diagram of this!)
+    146  *
+    147  * A second consequence is that the contents of the current page directory
+    148  * will always be available at virtual address (VPT + (VPT >> PGSHIFT)), to
+    149  * which vpd is set in entry.S.
+    150  */
+
+Before paging is enabled, our setup for the kernel va is based on the
+segmentation defined at entry.S. After paging is enabled, all access to memory
+should be via the page table itself automatically by the CPU. Among other
+ordinay page tables, what if we want to access a particular entry of the page
+table ITSELF? The only possibility is to let vpt point to itself.
+
+6. about completing exercise 3 (20120311)
+
+According to instructions in exercise 3, we'll find all info we need along
+i386_vm_init(). But it was only after finishing i386_vm_init() and while working
+at boot_map_segment() that we came to understand that what we've written for
+setting up mapping for kernel stack, all physical memory, pages should find its
+way into boot_map_segment() and boot_pgdir_walk(). Though it seems we have
+written much code and later simply commented it out, but we did gain better
+understanding thru the way.
+
+Finished the coding portion of exercise at 22:10.
+Debugging kernel code was difficult; the process was dirty. Improve it later.
+

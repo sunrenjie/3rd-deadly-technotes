@@ -1,0 +1,112 @@
+
+data structures and typedefs and defines
+
+utouch-geis-2.1.2/libutouch-geis/geis/geisimpl.h:
+ 54 /**
+ 55  * Portability types
+ 56  */
+ 57 typedef size_t         GeisSize;
+ 58 typedef uint32_t       GeisBoolean;
+ 59 typedef int32_t        GeisInteger;
+ 60 typedef float          GeisFloat;
+ 61 typedef void*          GeisPointer;
+ 62 typedef const char    *GeisString;
+
+utouch-geis-2.1.2/include/geis/geis.h:
+/**
+ * Indicates the type of filter operation.
+ */
+typedef enum _GeisFilterOperation
+{
+  GEIS_FILTER_OP_EQ,      /**< Compares for equality. */
+  GEIS_FILTER_OP_NE,      /**< Compares for inequality */
+  GEIS_FILTER_OP_GT,      /**< Compares for greater-than. */
+  GEIS_FILTER_OP_GE,      /**< Compares for greater-than-or-equal. */
+  GEIS_FILTER_OP_LT,      /**< Compares for less-than. */
+  GEIS_FILTER_OP_LE       /**< Compares for less-tha-or-equal. */
+} GeisFilterOperation;
+
+utouch-geis-2.1.2/include/geis/geis.h:
+ 105 /* Standard fundamental gestures */
+ 106 #define GEIS_GESTURE_DRAG    "Drag"
+ 107 #define GEIS_GESTURE_PINCH   "Pinch"
+ 108 #define GEIS_GESTURE_ROTATE  "Rotate"
+ 109 #define GEIS_GESTURE_TAP     "Tap"
+ 110 #define GEIS_GESTURE_TOUCH   "Touch"
+ 111 
+ 112 /* Extra higher-level gestures. */
+ 113 #define GEIS_GESTURE_FLICK   "Flick"
+
+utouch-qml-1.0.4/src/gesture.h:
+
+ 14 /**
+ 15  * A property type used for configuring gesture begin and end conditions based
+ 16  * on the number of active touches.
+ 17  */
+ 18 
+ 19 class TouchLimits : public QObject {
+ 20   Q_OBJECT
+ 21   /**
+ 22    * This property holds the number of touches required to begin a gesture.
+ 23    *
+ 24    * The default value is two touches.
+ 25    */
+ 26   Q_PROPERTY(int start READ start WRITE set_start NOTIFY startChanged)
+ 27 
+ 28  public:
+ 29   explicit TouchLimits(QObject* parent = 0);
+ 30 
+ 31   int start() const { return start_; }
+ 32   void set_start(int new_value);
+ 33 
+ 34  signals:
+ 35   void startChanged();
+ 36 
+ 37  private:
+ 38   int start_;
+ 39 
+ 40   Q_DISABLE_COPY(TouchLimits)
+ 41 };
+
+
+ 43 /**
+ 44  * An item describing a gesture subscription.
+ 45  */
+ 46 
+ 47 class Gesture : public QDeclarativeItem {
+ 48   Q_OBJECT
+ 49   Q_ENUMS(DeviceType)
+ 50 
+ 51   /**
+ 52    * This property holds the gesture begin and end conditions based on the
+ 53    * number of active touches.
+ 54    */
+ 55   Q_PROPERTY(TouchLimits* touches READ touches)
+ 56 
+ 57   /**
+ 58    * This property holds the device type.
+ 59    *
+ 60    * Only devices matching the device type will generate events. The default
+ 61    * value is All.
+ 62    */
+ 63   Q_PROPERTY(
+ 64     DeviceType devices READ devices WRITE set_devices NOTIFY
+ 65     devicesChanged)
+ 66 
+ 67   /**
+ 68    * \internal
+ 69    *
+ 70    * This property holds whether the gesture is a global system gesture.
+ 71    *
+ 72    * This property is only intended to be used by Unity. The existence and
+ 73    * implementation of this property may change without notice. A fully
+ 74    * supported public alternative may be provided in the future.
+ 75    */
+ 76   Q_PROPERTY(
+ 77     bool _UNITY_globalGesture READ _UNITY_globalGesture WRITE
+ 78     set_UNITY_globalGesture NOTIFY _UNITY_globalGestureChanged)
+ 79 
+ 80  public:
+ 81   explicit Gesture(QDeclarativeItem* parent = 0);
+ 82   ~Gesture();
+

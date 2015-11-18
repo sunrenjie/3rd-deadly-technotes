@@ -1,0 +1,13 @@
+
+HOW-TO for user mode linux @ 20130522
+
++ How to avoid segmentation fault in debugging uml using gdb?
+  (stolen from http://web2.clarkson.edu/class/cs644/kernel/setup/uml/gdb_uml.html)
+  + start gdb
+    + gdb /usr/bin/linux.uml
+  + give gdb commands:
+    + handle SIGSEGV pass nostop noprint
+    + handle SIGUSR1 pass nostop noprint
+  + run with arguments
+    + r ubd0=./debian.uml.rootfs mem=512m
+

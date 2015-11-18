@@ -1,0 +1,60 @@
+
+Openstack networking
+
+Quoting OpenStack Training Guides, Chapter 7. Network Node:
+(http://docs.openstack.org/training-guides/content/associate-network-node.html)
+
+A standard OpenStack Networking setup has up to four distinct physical data
+center networks:
+
++ Management network: Used for internal communication between OpenStack
+  Components. The IP addresses on this network should be reachable only within
+  the data center.
+
++ Data (guest) network: Used for VM data communication within the cloud
+  deployment. The IP addressing requirements of this network depend on the
+  OpenStack Networking plug-in in use.
+
++ External network: Used to provide VMs with Internet access in some deployment
+  scenarios. The IP addresses on this network should be reachable by anyone on
+  the Internet.
+
++ API network: Exposes all OpenStack APIs, including the OpenStack Networking
+  API, to tenants. The IP addresses on this network should be reachable by
+  anyone on the Internet. This may be the same network as the external network,
+  as it is possible to create a subnet for the external network that uses IP
+  allocation ranges to use only less than the full range of IP addresses in an
+  IP block.
+
+A demo picture ./network-domains-diagram.png explains the setup well. It is
+taken from
+http://docs.openstack.org/security-guide/content/ch031_neutron-architecture.html
+
+Nevertheless, the above discussion is largely conceptual. Pragmatically,
+'ordinary' setup will involve three networks:
+
+1) management network (completely private; installed on all nodes)
+
+   For single-node setup, the localhost (lo) network is typically used. For
+   example, in devstack and RDO packstack, the user is not asked about this.
+   For multi-node setup, however, setting of interface for this network is
+   required. For example, in devstack, FLAT_INTERFACE shall be set to an
+   interface with static IP. Situation is similar for RDO packstack.
+   
+2) external network (external VM access in network node; external dashboard
+   access in controller node)
+   
+   For external VM access in network node, an OVS bridge br-ex is created.
+   Additional setup is then required by, for example, adding an external-access
+   interface to the bridge.
+   
+   For external dashboard access in controller node, the http web server
+   listens on all ports. Add an external-access interface to the host suffice.
+
+3) data network (connection between VMs)
+   For GRE tunneling, this is created and managed by the network and compute
+   nodes.
+
+A demo setup diagram ./installguide_arch-neutron.png is taken from
+http://docs.openstack.org/icehouse/install-guide/install/apt-debian/content/ch_overview.html
+

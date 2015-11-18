@@ -1,0 +1,63 @@
+
+MacOSX Lion 10.7.2 related activities
+
+Dec 31, 2011
+
+=================================================================
+Installation on VMWare (in Debian GNU/Linux x86_64 for this case)
+=================================================================
+
+Follow the guide at
+http://www.insanelymac.com/forum/index.php?showtopic=273764 :
+1) get lion 10.7.2 release .dmg (5a8bc4c636f35c855250c7b5508ae7a5).
+2) extract with 7z to get the InstallESD.dmg inside.
+3) convert to iso: dmg2img (dmg2img-1.6.2.tar.gz)InstallESD.dmg InstallESD.img.
+4) install VMware 8.0.1 build-528992:
+   VMware-Workstation-Full-8.0.1-528992.x86_64.bundle
+5) apply VMWare unlocking patch for MacOSX Lion (unlock-all-v102.zip:
+   7356e10ed0b95941338ce22ec5972bb6).
+6) create a new 'Mac OS X 10.7 x64' virtual machine.
+7) delete all virtual networks in virtual network editor in vmware (better take
+   a screenshot here for further restoration).
+8) boot, create partition, install MacOSX.
+9) install vmware tools.
+10) shutdown and go th virtual network editor and restore to default.
+11) customize your lion.
+
+=========
+spotlight
+=========
+
+If you want to turn off spotlight completely then
+sudo mdutil -i off /
+
+if you want to re-enable spotlight then you need to
+sudo mdutil -i on / && sudo mdutil -E /
+
+====================
+shrink virtual disks
+====================
+
+Follow the guide by Donk (the author of the unlocker!!!) at
+http://www.insanelymac.com/forum/index.php?showtopic=148667 :
+
+1) open terminal in virtual machine.
+2) write a very large zero fileed file to zero-fill all sectors (exactly what
+   vmware tools does during the "preparing for shrink" phase)
+   sudo dd if=/dev/zero of=/zerofile bs=4096 count=1000000000
+   When the disk is full then use Ctrl-C to stop the command; delete the file.
+3) shutdown the guest.
+4) close VMWare.
+5) compact the disk; typically 'Edit virtual machine settings' -> 'Hard disk'
+   -> 'Compact'.
+
+Mar 14, 2012:
+To compile wine-1.4 under macosx 10.7.2:
+compile 32bit library: freetype libpng libjpeg
+(freetype-2.4.9.tar.gz  jpegsrc.v8b.tar.gz  libpng-1.4.3.tar.bz2) with flags:
+env PATH="/usr/local/bin:$PATH" CFLAGS="-m32" LFLAGS="-m32"
+Then compile wine with flags:
+env PATH="/usr/local/bin:$PATH" CFLAGS="-m32" LFLAGS="-m32 -framework CoreServices -framework CoreFoundation -framework AudioUnit -framework AudioToolbox -framework CoreAudio" CPPFLAGS="-m32".
+The compilation succeeded; though the program just crashes on start.
+Off-topic now; just quit this effort now.
+

@@ -1,0 +1,15 @@
+[P]: Mutt won't display non-ANSI characters properly.
+[S]: Set LANG="en_US.UTF-8" at terminal.
+
+[P]: Mutt starts up with complaint of 'header_cache: unknown variable'.
+[S]: The option '--enable-hcache' shall be specified while running ./configure.
+     For proper compilation of mutt with this option, an adequate database, say
+     db47, shall be installed via macports; also, the command line shall look
+     like:
+     env CPPFLAGS=-I/opt/local/include/ LDFLAGS=-L/opt/local/lib/ ./configure \
+       --enable-hcache --enable-pop --enable-imap --enable-smtp --with-ssl
+
+     [The above solution is stolen from
+      http://thomer.com/howtos/mutt_on_mac.html and tested to work with mutt
+      version 1.5.23.]
+

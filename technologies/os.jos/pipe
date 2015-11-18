@@ -1,0 +1,26 @@
+
+JOS pipe structure as defined in lib/pipe.c:
+
+22 struct Pipe {
+23      off_t p_rpos;           // read position
+24      off_t p_wpos;           // write position
+25      uint8_t p_buf[PIPEBUFSIZ];      // data buffer
+26 };
+...
+44      // allocate the pipe structure as first data page in both
+45      va = fd2data(fd0);
+...
+197 static int
+198 pipeclose(struct Fd *fd)
+199 {
+200     return sys_page_unmap(0, fd2data(fd));
+201 }
+
+Notes:
+1. The one-and-only internal data structure maintained by the two Fd structures
+   at both ends is the pipe structure shared by both. It is allocated in pipe()
+   and deallocated in pipeclose() (when, of course, the reference count drops
+   to zero, at which time both ends of the pipe are closed). For simplicity, it
+   is placed at the 1st page of data in both Fd.
+2. The Fd structures are deallocated by fd_close() in lib/fd.c.
+

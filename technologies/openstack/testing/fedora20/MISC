@@ -1,0 +1,80 @@
+How does ping VM floating IP (say 192.168.1.229) work?
+
+Let's say there is no existing arp (ip nei) entries for the IP in the host.
+(The following arp process will set the mac address for the ip to that of the fg-xxx
+device of the node hosting the VM; wrongful arp entries (e.g., mac address of another node's fg-xxx device is used)
+may result in trouble.
+
+At the default namespace, in $(ip route):
+
+[routing] 192.168.1.0/24 dev br-ex  proto kernel  scope link  src 192.168.1.225
+
+The arp broadcast packet sent to port br-ex.
+
+[ovs] br-ex is in NORMAL mode; the packet is flooded to all ports (ens3, fg-xxx, qg-xxx)
+If the VM is in this host, packet sent to fg-xxx (in the fip namespace) will get reply.
+Otherwise, ens3 will forward the packet to the host containing this VM, whose fg-xxx
+will reply the request. In any case, the packet will be sent to the fg-xxx interface
+of fip namespace handling the floating IP.
+
+[fg-xxx proxy arp] For ALL arp requests, fg-xxx will reply with its own mac addresses.
+Now that all fg-xxx devices on all nodes are allowed to respond. This may results in
+uncertainties and errors (ses question below).
+
+Suppose that the MAC address is correctly learnt (the mac address of the
+fg-xxx device on the VM's host), when we send packets to the VM (ping it
+or ssh onto it), the packet will arrive at the correponding fg-xxx device, as described above.
+
+[fip namespace routing] The fip namespace containing the fg-xxx device will contain an
+route entry like:
+192.168.1.229 via 169.254.31.28 dev fpr-05e8b02c-0
+Therefore, the packet will find its way into fpr-xxx and hence to rfp-xxx device in the qrouter-xxx
+namespace.
+
+[question] why the rfp-xxx device holds all allocated floating addresses:
+2: rfp-05e8b02c-0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether 9e:aa:77:cf:25:c1 brd ff:ff:ff:ff:ff:ff
+    inet 169.254.31.28/31 scope global rfp-05e8b02c-0
+       valid_lft forever preferred_lft forever
+    inet 192.168.1.231/32 brd 192.168.1.231 scope global rfp-05e8b02c-0
+       valid_lft forever preferred_lft forever
+    inet 192.168.1.229/32 brd 192.168.1.229 scope global rfp-05e8b02c-0
+       valid_lft forever preferred_lft forever
+    inet6 fe80::9caa:77ff:fecf:25c1/64 scope link
+       valid_lft forever preferred_lft forever
+
+[iptables DNAT] The iptable PREROUTING DNAT entry will redirect the packet to 10.0.0.5, the
+private address of the VM.
+-A neutron-vpn-agen-PREROUTING -d 192.168.1.229/32 -j DNAT --to-destination 10.0.0.5
+
+[ip route] The packet with destination ip modified to 10.0.0.5 will be sent to the
+qr-xxx device, thanks to the routin entry in the qrouter-xxx namespace:
+10.0.0.0/24 dev qr-045f37fc-97  proto kernel  scope link  src 10.0.0.1
+
+[ovs] The packet now enters the ovs bridge br-int. According to the flows,
+the action is normal: the switch learns that packets to 10.0.0.5 will go to qvo-xxx,
+and then to its veth peer qvb-xxx, then to tap-xxx (via linux bridge), and finally
+to the vm.
+
+[question] why does routing table in fip namespace has entries for ALL VMs?
+Ain't we supposed to access VM from the fip namespace of the node actually hosting the VM?
+This is even less reasonable considering that in the qrouter namespace there is DNAT/SNAT
+entries for only VMs hosted in this node. Routing entries for VMs on other nodes
+are ineffective.
+
+[question] will broadcasting packets affected by iptables entries in the default namespace? See below:
+-A neutron-openvswi-sg-chain -m physdev --physdev-out tap656088a7-65 --physdev-is-bridged -m comment --comment "Jump to the VM specific chain." -j neutron-openvswi-i656088a7-6
+-A neutron-openvswi-sg-chain -m physdev --physdev-in tap656088a7-65 --physdev-is-bridged -m comment --comment "Jump to the VM specific chain." -j neutron-openvswi-o656088a7-6
+
+[question] why would wrong arp for the VM floating IP is learnt?
+The phenomenon is observed in a random manner. When you send arp request in
+a node, the request floods br-ex bridges of all nodes. All their fg-xxx devices
+have the proxy arp feature enabled, will reply with its own MAC addresses.
+The reply accepted is the one comes the fastest, which is largely unpredictable.
+The solution is removing the wrong entry and relearn.
+
+The question is, how would we learn the mac addresses in advance, in the same
+manner as local arp responder? Or if there is any mis-configurations at our part?
+
+[note] tcpdump '-n' '-e' '-X' options help sometimes.
+

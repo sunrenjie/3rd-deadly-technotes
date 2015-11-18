@@ -1,0 +1,96 @@
+Change If47ef195: ML2 Cisco Nexus MD: Remove workaround for bug 1276395
+
+https://review.openstack.org/#/c/82839/
+
+ML2 Cisco Nexus MD: Remove workaround for bug 1276395
+
+Before bug 1276395 was merged the delete_port_postcommit() mechanism
+drivers did not have access to the bound_segment information that was
+in the process of being deleted.
+Code was added to the cisco_nexus md to workaround this issue.
+This code can now be removed.
+
+Change-Id: If47ef1958bf4de863995b9cfc042abf5bc849e24
+Closes-Bug: 1297321
+
+Bug Description
+
+https://bugs.launchpad.net/neutron/+bug/1276395
+
+ML2 mechanism driver methods such as port_update_precommit() and
+port_update_postcommit() are currently called by the plugin as part of
+operations in which port bindings are established and/or torn down. Within
+these methods, details about the newly established or current binding, such as
+the binding:vif_type attribute and the bound segment, are available from the
+PortContext object. Similar details for a binding that is being torn down as
+part of a port update or delete operation are needed by some mechanism drivers,
+but are not currently available from the PortContext.
+
+Notes:
+0. This is the last of a series of changes to fix bug 1276395. Fundamentally,
+   the origin API design is flawed. In retrospect, there are a few redundant
+   interface functions which do more harm than good. In addition, the model is
+   inadequate and needs extensions.
+1. [context] When a port is updated/deleted, the plugin makes two calls to         
+   the mechanism drivers, precommit() when db transaction is being processed       
+   and postcommit() afterwards. The separation is because for db transaction,   
+   we have to consider exceptions, corresponding rollbacks, etc. Due to flaws   
+   in the original design, bound_segment information is not available when         
+   the postcommit() functions are called. For this particular case, the nexus   
+   mechanism driver postcommit() functions need vlan_id which is unavailable.   
+   As a workaround, this info is saved in call to precommit() for use in call   
+   to postcommit(). Fortunately, both of two parts of the workaround occur         
+   in the same function, is easy to add and is easy to remove. By the way,
+   that *is* good coding style. Now that original_bound_segment element is
+   added in change I9ecff4a4e044920ed2dde709c89aeb9bc773220d and the binding
+   info is made available in change I70fb65b478373c4f07f5273baa097fc50e5ba2ef
+   (by removing call to mechanism driver API interface unbind_port()), this
+   workaround is not longer needed.
+2. This change simply removed the workaround.
+3. The test cases are already around; so no new ones are needed.
+
+Changes:
+ .../plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py   | 15 +--------------
+ + Removed the workaround. The port UPDATE and DELETE operation API calls do
+   _delete_nxos_db() in precommit() portion (when db transaction is performed)
+   and _delete_switch_entry() in postcommit() portion (afterwards), both of
+   which are delegated to _port_action(). Therefore, the best place to insert
+   the workaround is the _port_action() where the saving/using of the vlan_id
+   can be performed based on the action that is requested (be it
+   _delete_nxos_db() or _delete_switch_entry()?).
+ 1 file changed, 1 insertion(+), 14 deletions(-)
+
+Diff:
+diff --git a/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py b/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py
+index 4f624b1..8f98f9f 100644
+--- a/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py
++++ b/neutron/plugins/ml2/drivers/cisco/nexus/mech_cisco_nexus.py
+@@ -151,13 +151,7 @@ class CiscoNexusMechanismDriver(api.MechanismDriver):
+         """Verify configuration and then process event."""
+         device_id = port.get('device_id')
+         host_id = port.get(portbindings.HOST_ID)
+-
+-        # Workaround until vlan can be retrieved during delete_port_postcommit
+-        # event.
+-        if func == self._delete_switch_entry:
+-            vlan_id = self._delete_port_postcommit_vlan
+-        else:
+-            vlan_id = self._get_vlanid(segment)
++        vlan_id = self._get_vlanid(segment)
+ 
+         if vlan_id and device_id and host_id:
+             func(vlan_id, device_id, host_id)
+@@ -167,13 +161,6 @@ class CiscoNexusMechanismDriver(api.MechanismDriver):
+             fields += "host_id" if not host_id else ""
+             raise excep.NexusMissingRequiredFields(fields=fields)
+ 
+-        # Workaround until vlan can be retrieved during delete_port_postcommit
+-        # event.
+-        if func == self._delete_nxos_db:
+-            self._delete_port_postcommit_vlan = vlan_id
+-        else:
+-            self._delete_port_postcommit_vlan = 0
+-
+     def update_port_precommit(self, context):
+         """Update port pre-database transaction commit event."""
+

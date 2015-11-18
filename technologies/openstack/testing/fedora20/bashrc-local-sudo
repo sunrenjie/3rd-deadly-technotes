@@ -1,0 +1,140 @@
+#!/bin/bash
+# Since this script is run as sudo for every login, it shall define tasks
+# appropriate for that purposes; for once only tasks, perform them
+# conditionally based on condition checking.
+
+# mount the shared file system:
+# (the reason we do not implement this as auto-mount feature in /etc/fstab is
+# that the system will hang while trying the mount; we are yet to figure out
+# why and the solution)
+function mount_shared_fs {
+  echo '#Info: mounting shared file system.'
+  fs=$1 # shared file system
+  dir1=$2 # mounted directory
+  dir2="$2/$3" # the shared file system root directory after mount
+  if [ -d $dir2 ] ; then # already mounted?
+    return 0
+  fi
+  mkdir -p $dir1
+  mount -t 9p -o trans=virtio,version=9p2000.L $fs $dir1
+  if [ -d $dir2 ] ; then
+    use_shared_fs $dir2
+  else
+    echo "#Error: mounting shared file system $fs to $dir1 failed."
+  fi
+}
+
+# make use of the shared fs:
+# 1. create symlinks for the cache dirs
+function use_shared_fs {
+  local dir=$1
+  
+  echo '#Info: configuring yum & pip cache.'
+  for d in /var/cache/yum /var/cache/pip ; do
+    rm -rf $d
+    ln -s $dir/$d $d
+  done
+}
+
+function config_pypi_mirror {
+  local PYPI_MIRROR=$1
+  echo '#Info: configuring python mirror.'
+  conf1=/root/.pip/pip.conf
+  conf2=/root/.pydistutils.cfg
+  if [ ! -f $conf1 ] ; then
+    mkdir -p `echo $conf1 | sed 's:[^\/]*$::'`
+    echo "[global]
+index-url = $PYPI_MIRROR
+download_cache = /var/cache/pip
+" > $conf1
+  else
+    echo "#Info: Skipped configuration for $conf1 ."
+  fi
+  
+  if [ ! -f $conf2 ] ; then
+    echo "[easy_install]
+index-url = $PYPI_MIRROR
+" > $conf2
+  else
+    echo "#Info: Skipped configuration for $conf2 ."
+  fi
+}
+
+# Make sure that the line 'UseDNS no' is added to /etc/sshd_config to reduce
+# latency in displaying password prompt.
+function config_sshd_UseDNS {
+  if ! grep '^UseDNS no$' $1 1>/dev/null 2>/dev/null ; then
+    echo 'UseDNS no' >> $1
+    service sshd restart
+  fi
+}
+function config_sshd {
+  echo '#Info: configuring sshd.'
+  if [ -f /etc/sshd_config ] ; then
+    config_sshd_UseDNS /etc/sshd_config
+  elif [ -f /etc/ssh/sshd_config ] ; then
+    config_sshd_UseDNS /etc/ssh/sshd_config
+  else
+    echo '#Warning: sshd_config not found; config_sshd_UseDNS skipped .'
+  fi
+}
+
+# configure yum to cache downloaded installation files.
+function config_yum {
+  echo '#Info: configuring yum to keep cache.'
+  local config=/etc/yum.conf
+  if grep '^keepcache=1$' $config 1>/dev/null; then
+    return
+  elif ! grep '^keepcache=' $config 1>/dev/null ; then
+    echo 'keepcache=1' >> $config
+  else # '^keepcache=[^1].*$'
+    sed -i 's/^keepcache=.*$/keepcache=1/' $config
+  fi
+}
+
+# disable SELinux
+function disable_selinux {
+  echo '#Info: disabling SELinux.'
+  setenforce 0
+  local config=/etc/selinux/config
+  if [ ! -e $config ]; then
+    return
+  fi
+  setting=$(grep '^SELINUX=[a-z]*$' $config | awk 'BEGIN{FS="="}{print $2}')
+  if [ -z "$setting" ]; then
+    echo 'SELINUX=disabled' >> $config
+  elif [ "$setting" = "disabled" ]; then
+    return
+  else
+    sed -i 's/^SELINUX=[a-z]*$/SELINUX=disabled/' $config
+  fi
+}
+
+function use_google_dns {
+  echo '#Info: using google dns 8.8.8.8.'
+  echo 'nameserver 8.8.8.8' > /etc/resolv.conf
+}
+
+function amend_network {
+  # Work around strange bug:
+  # When mac address of the 1st nic (ens3) is modified in ifcfg via
+  # MACADDR entry, our arrangements of have ens3 bridged to br-ex while the
+  # latter taking the former's MAC and IP addresses don't work.
+  if [ -f /etc/sysconfig/network-scripts/ifcfg-br-ex ]; then
+    if ! ifconfig br-ex 2>/dev/null | grep -q 192\.168; then
+      ifdown ens3 br-ex
+      dhclient -v -r ens3 2>/dev/null
+      ifup ens3 br-ex
+    fi
+  fi
+}
+
+
+mount_shared_fs host0 /host0 vm
+config_sshd
+config_pypi_mirror http://pypi.gocept.com/simple
+config_yum
+disable_selinux
+use_google_dns
+amend_network
+

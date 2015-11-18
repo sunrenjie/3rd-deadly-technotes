@@ -1,0 +1,114 @@
+commit f50df8eb3c5bf38abbb0389b85c4b628cffb59f4
+Author: Dane LeBlanc <leblancd@cisco.com>
+Date:   Wed Feb 19 15:53:18 2014 -0500
+
+    Delete subnet fails if assoc port has IPs from another subnet
+    
+    This change fixes the following failure scenario:
+    - Create a network
+    - Create two subnets on the network
+    - Create a port on the network using one of the subnets
+    - Delete the other subnet
+    = = = > FAILURE: Subnet delete fails because supposedly there
+    is/are port(s) still associated with that subnet.
+    
+    The problem addressed is that delete_subnet() in
+    neutron/db/db_base_plugin.py is checking for port(s) still being
+    associated with the subnet's network, not the subnet itself.
+    
+    Change-Id: I7adbe18cce412135b2e42dcb7c592e60c1ec5f8f
+    Closes-Bug: #1281694
+
+Notes:
+1. This change is quite straightforward: use more appropriate filters
+   according to the purpose. But L.1241 is a big concern; see comments.
+
+---
+ neutron/db/db_base_plugin_v2.py      |  9 +++++----
+ neutron/tests/unit/test_db_plugin.py | 16 ++++++++++++++++
+ 2 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/neutron/db/db_base_plugin_v2.py b/neutron/db/db_base_plugin_v2.py
+index f96edf9..a1e72c9 100644
+--- a/neutron/db/db_base_plugin_v2.py
++++ b/neutron/db/db_base_plugin_v2.py
+@@ -1235,10 +1235,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
+         with context.session.begin(subtransactions=True):
+             subnet = self._get_subnet(context, id)
+             # Check if any tenant owned ports are using this subnet
+-            allocated_qry = context.session.query(models_v2.IPAllocation)
+-            allocated_qry = allocated_qry.join(models_v2.Port)
+-            allocated = allocated_qry.filter_by(
+-                network_id=subnet.network_id).with_lockmode('update')
++            allocated = (context.session.query(models_v2.IPAllocation).
++                         filter_by(subnet_id=subnet['id']).
++                         join(models_v2.Port).
++                         filter_by(network_id=subnet['network_id']).
++                         with_lockmode('update'))
+ 
+             # remove network owned ports
+             for a in allocated:
+diff --git a/neutron/tests/unit/test_db_plugin.py b/neutron/tests/unit/test_db_plugin.py
+index 88e158b..1168026 100644
+--- a/neutron/tests/unit/test_db_plugin.py
++++ b/neutron/tests/unit/test_db_plugin.py
+@@ -2430,6 +2430,22 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
+                 msg = str(q_exc.SubnetInUse(subnet_id=id))
+                 self.assertEqual(data['NeutronError']['message'], msg)
+ 
++    def test_delete_subnet_with_other_subnet_on_network_still_in_use(self):
++        with self.network() as network:
++            with contextlib.nested(
++                self.subnet(network=network),
++                self.subnet(network=network, cidr='10.0.1.0/24',
++                            do_delete=False)) as (subnet1, subnet2):
++                subnet1_id = subnet1['subnet']['id']
++                subnet2_id = subnet2['subnet']['id']
++                with self.port(
++                    subnet=subnet1,
++                    fixed_ips=[{'subnet_id': subnet1_id}]):
++                    req = self.new_delete_request('subnets', subnet2_id)
++                    res = req.get_response(self.api)
++                    self.assertEqual(res.status_int,
++                                     webob.exc.HTTPNoContent.code)
++
+     def test_delete_network(self):
+         gateway_ip = '10.0.0.1'
+         cidr = '10.0.0.0/24'
+
+_______________________________________________________________________________
+APPENDIX Comments
+
+c/74840/6/neutron/db/db_base_plugin_v2.py
+
+_______________________________ Akihiro Motoki		Mar 28
+
+Do we still need to filter by network_id? One subnet belongs to only one
+network and we already narrow IPAllocaiton by subnet_id at L.1239.
+
+The change was made from patch set 2 to 3, but I am not sure why
+filter_by(network_id) is required. Let me clarfiy.
+
+_______________________________ Lee Li		Mar 29
+
+I agree. It's not need to filter by network_id.
+
+_______________________________ Henry Gessau		Mar 30
+
+I am far from being any kind of expert on database queries, but the two filters
+seem correct to me. There are two tables being filtered separately and then
+joined for the final result. IPAllocations are filtered by subnet and Ports are
+filtered by network. If I am wrong on this, please educate me.
+
+
+_______________________________ Akihiro Motoki		Mar 31
+
+I checked more detail. In this case we need to consider with_lockmode at the
+next line. L.1241 is required to make 'FOR UPDATE' work for ports. Without
+this, related ports are not locked for update. As a conclusion, L.1241 is
+required.
+
+(For a case without with_lockmode, L.1241 filter_by is unnecessary.)
+
+Thanks,
+

@@ -1,0 +1,327 @@
+commit 2ecd8203f006408d2b761abd344d96fad3fd311e
+Author: Oleg Bondarev <obondarev@mirantis.com>
+Date:   Mon Mar 24 16:58:55 2014 +0400
+
+    LBaaS: make device driver decide whether to deploy instance
+    
+    Currently server throws an error in case agent (device driver)
+    requests logical config for non-active pool, which is a bug
+    as it's ok if pool is in pending create/update states.
+    Also the pool may be already scheduled for delete (pending_delete)
+    while agent requests it to perform some previous update, which
+    as also ok and agent just doesn't deploy such config.
+    
+    This patch moves active pool check from server side to agent side
+    
+    Closes-Bug: #1295491
+    Change-Id: Ib088355a0b3efffdcd211a8cfe6942833bb9f895
+
+Notes:
+1. This commit changes both the policy and its enforcement checkpoint over
+   status of LBaaS pool requested.
+2. [context] On agent start, LBaas agent manager may request logical driver
+   config info from plugin (server) side, pool info in this case, and ask the
+   (agent side) device driver to deploy the instance. Previously the plugin
+   side, while performing db transaction to retrieve db info, do additional
+   tests to verify that the pool is active. Now this behavior is considered a
+   bug. In addition, the agent side is considered a better place to do the
+   verifications.
+3. [summary] 'This patch moves active pool check from server side to agent
+   side'.
+
+---
+ .../drivers/common/agent_driver_base.py            |  6 -----
+ .../drivers/haproxy/namespace_driver.py            | 14 +++++++----
+ .../drivers/haproxy/test_namespace_driver.py       | 15 +++++++++++-
+ .../loadbalancer/drivers/test_agent_driver_base.py | 27 ++++++++++++++--------
+ 4 files changed, 41 insertions(+), 21 deletions(-)
+
+diff --git a/neutron/services/loadbalancer/drivers/common/agent_driver_base.py b/neutron/services/loadbalancer/drivers/common/agent_driver_base.py
+index aec7be0..99b2351 100644
+--- a/neutron/services/loadbalancer/drivers/common/agent_driver_base.py
++++ b/neutron/services/loadbalancer/drivers/common/agent_driver_base.py
+@@ -95,12 +95,6 @@ class LoadBalancerCallbacks(object):
+             qry = context.session.query(loadbalancer_db.Pool)
+             qry = qry.filter_by(id=pool_id)
+             pool = qry.one()
+-            if pool.status != constants.ACTIVE:
+-                raise n_exc.Invalid(_('Pool_id %(pool_id)s status ACTIVE '
+-                                      'is expected but status is %(status)s') %
+-                                    {'pool_id': pool_id,
+-                                     'status': pool.status})
+-
+             retval = {}
+             retval['pool'] = self.plugin._make_pool_dict(pool)
+ 
+diff --git a/neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py b/neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py
+index 6bb971b..7307bca 100644
+--- a/neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py
++++ b/neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py
+@@ -265,11 +265,15 @@ class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
+ 
+     @n_utils.synchronized('haproxy-driver')
+     def deploy_instance(self, logical_config):
+-        # do actual deploy only if vip is configured and active
+-        if ('vip' not in logical_config or
+-            (logical_config['vip']['status'] not in
+-             constants.ACTIVE_PENDING_STATUSES) or
+-            not logical_config['vip']['admin_state_up']):
++        # do actual deploy only if vip and pool are configured and active
++        if (not logical_config or
++                'vip' not in logical_config or
++                (logical_config['vip']['status'] not in
++                 constants.ACTIVE_PENDING_STATUSES) or
++                not logical_config['vip']['admin_state_up'] or
++                (logical_config['pool']['status'] not in
++                 constants.ACTIVE_PENDING_STATUSES) or
++                not logical_config['pool']['admin_state_up']):
+             return
+ 
+         if self.exists(logical_config['pool']['id']):
+diff --git a/neutron/tests/unit/services/loadbalancer/drivers/haproxy/test_namespace_driver.py b/neutron/tests/unit/services/loadbalancer/drivers/haproxy/test_namespace_driver.py
+index b98cc29..504c592 100644
+--- a/neutron/tests/unit/services/loadbalancer/drivers/haproxy/test_namespace_driver.py
++++ b/neutron/tests/unit/services/loadbalancer/drivers/haproxy/test_namespace_driver.py
+@@ -48,7 +48,8 @@ class TestHaproxyNSDriver(base.BaseTestCase):
+         self.driver.vif_driver = self.vif_driver
+ 
+         self.fake_config = {
+-            'pool': {'id': 'pool_id'},
++            'pool': {'id': 'pool_id', 'status': 'ACTIVE',
++                     'admin_state_up': True},
+             'vip': {'id': 'vip_id', 'port': {'id': 'port_id'},
+                     'status': 'ACTIVE', 'admin_state_up': True}
+         }
+@@ -357,6 +358,18 @@ class TestHaproxyNSDriver(base.BaseTestCase):
+             self.driver.deploy_instance(self.fake_config)
+             self.assertFalse(exists.called)
+ 
++    def test_deploy_instance_pool_status_non_active(self):
++        with mock.patch.object(self.driver, 'exists') as exists:
++            self.fake_config['pool']['status'] = 'NON_ACTIVE'
++            self.driver.deploy_instance(self.fake_config)
++            self.assertFalse(exists.called)
++
++    def test_deploy_instance_pool_admin_state_down(self):
++        with mock.patch.object(self.driver, 'exists') as exists:
++            self.fake_config['pool']['admin_state_up'] = False
++            self.driver.deploy_instance(self.fake_config)
++            self.assertFalse(exists.called)
++
+     def test_refresh_device(self):
+         with mock.patch.object(self.driver, 'deploy_instance') as deploy:
+             pool_id = 'pool_id1'
+diff --git a/neutron/tests/unit/services/loadbalancer/drivers/test_agent_driver_base.py b/neutron/tests/unit/services/loadbalancer/drivers/test_agent_driver_base.py
+index c828bd6..8efec3a 100644
+--- a/neutron/tests/unit/services/loadbalancer/drivers/test_agent_driver_base.py
++++ b/neutron/tests/unit/services/loadbalancer/drivers/test_agent_driver_base.py
+@@ -22,7 +22,6 @@ import mock
+ from six.moves import xrange
+ from webob import exc
+ 
+-from neutron.common import exceptions
+ from neutron import context
+ from neutron.db.loadbalancer import loadbalancer_db as ldb
+ from neutron.db import servicetype_db as st_db
+@@ -180,15 +179,25 @@ class TestLoadBalancerCallbacks(TestLoadBalancerPluginBase):
+                 )
+                 self.assertFalse(ready)
+ 
+-    def test_get_logical_device_inactive(self):
++    def test_get_logical_device_non_active(self):
+         with self.pool() as pool:
+-            with self.vip(pool=pool) as vip:
+-                with self.member(pool_id=vip['vip']['pool_id']):
+-                    self.assertRaises(
+-                        exceptions.Invalid,
+-                        self.callbacks.get_logical_device,
+-                        context.get_admin_context(),
+-                        pool['pool']['id'])
++            ctx = context.get_admin_context()
++            for status in ('INACTIVE', 'PENDING_CREATE', 'PENDING_UPDATE'):
++                self.plugin_instance.update_status(
++                    ctx, ldb.Pool, pool['pool']['id'], status)
++                pool['pool']['status'] = status
++                expected = {
++                    'pool': pool['pool'],
++                    'members': [],
++                    'healthmonitors': [],
++                    'driver': 'dummy'
++                }
++
++                logical_config = self.callbacks.get_logical_device(
++                    ctx, pool['pool']['id']
++                )
++
++                self.assertEqual(expected, logical_config)
+ 
+     def test_get_logical_device_active(self):
+         with self.pool() as pool:
+Code analysis:
+0. Upon Lbaas agent start, initialize_service_hook() method from class
+   LbaasAgentManager is called.
+
+    neutron/services/loadbalancer/agent/agent.py:26:from neutron.openstack.common.rpc import service as rpc_service
+    
+    neutron/services/loadbalancer/agent/agent.py:39:class LbaasAgentService(rpc_service.Service):
+
+    neutron/services/loadbalancer/agent/agent.py:50:def main():
+    neutron/services/loadbalancer/agent/agent.py:64:    mgr = manager.LbaasAgentManager(cfg.CONF)
+    neutron/services/loadbalancer/agent/agent.py:65:    svc = LbaasAgentService(
+    neutron/services/loadbalancer/agent/agent.py:66:        host=cfg.CONF.host,
+    neutron/services/loadbalancer/agent/agent.py:67:        topic=topics.LOADBALANCER_AGENT,
+    neutron/services/loadbalancer/agent/agent.py:68:        manager=mgr
+    neutron/services/loadbalancer/agent/agent.py:69:    )
+    neutron/services/loadbalancer/agent/agent.py:70:    service.launch(svc).wait()
+
+    neutron/openstack/common/rpc/service.py:28:class Service(service.Service):
+    neutron/openstack/common/rpc/service.py:43:    def start(self):
+    neutron/openstack/common/rpc/service.py:63:        if callable(getattr(self.manager, 'initialize_service_hook', None)):
+    neutron/openstack/common/rpc/service.py:64:            self.manager.initialize_service_hook(self)
+
+pre.agent-side.device_driver.A:
+      The lbass driver is specified in config and will be read into
+      LbaasAgentManager instance in lbaas main().
+
+    etc/lbaas_agent.ini:31:# device_driver = neutron.services.loadbalancer.drivers.haproxy.namespace_driver.HaproxyNSDriver
+
+pre.agent-side.device_driver.B:
+      The class HaproxyNSDriver, the agent side loadblancer device driver
+      specified in config file, performs deploy_instance(), among other ops.
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:61:class HaproxyNSDriver(agent_device_driver.AgentDeviceDriver):
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:266:    @n_utils.synchronized('haproxy-driver')
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:267:    def deploy_instance(self, logical_config):
+*** Modification -265,11 +265,15:
+*** Added condition that pool is configured in order for the deployment to
+*** proceed, something moved from server side to this agent side.
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:268:        # do actual deploy only if vip and pool are configured and active
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:269:        if (not logical_config or
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:270:                'vip' not in logical_config or
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:271:                (logical_config['vip']['status'] not in
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:272:                 constants.ACTIVE_PENDING_STATUSES) or
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:273:                not logical_config['vip']['admin_state_up'] or
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:274:                (logical_config['pool']['status'] not in
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:275:                 constants.ACTIVE_PENDING_STATUSES) or
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:276:                not logical_config['pool']['admin_state_up']):
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:277:            return
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:279:        if self.exists(logical_config['pool']['id']):
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:280:            self.update(logical_config)
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:281:        else:
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:282:            self.create(logical_config)
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:284:    def _refresh_device(self, pool_id):
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:285:        logical_config = self.plugin_rpc.get_logical_device(pool_id)
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:286:        self.deploy_instance(logical_config)
+
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:288:    def create_vip(self, vip):
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:289:        self._refresh_device(vip['pool_id'])
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:290:
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:291:    def update_vip(self, old_vip, vip):
+    neutron/services/loadbalancer/drivers/haproxy/namespace_driver.py:292:        self._refresh_device(vip['pool_id'])
+
+pre.agent-side.agent-manager.rpc:
+      The class LbaasAgentManager __init__() initializes self.plugin_rpc
+      to be an object of class LbaasAgentApi which will handle calls like
+      get_logical_device() and others.
+
+pre.agent-side.device_driver.C:
+      Device drivers info that is read from config in the lbaas main() now gets
+      loaded by LbaasAgentManager._load_drivers() as part of __init__().
+
+    neutron/services/loadbalancer/agent/agent_manager.py:31:from neutron.services.loadbalancer.agent import agent_api
+
+    neutron/services/loadbalancer/agent/agent_manager.py:49:class LbaasAgentManager(periodic_task.PeriodicTasks):
+    neutron/services/loadbalancer/agent/agent_manager.py:60:    def __init__(self, conf):
+    neutron/services/loadbalancer/agent/agent_manager.py:61:        self.conf = conf
+
+    neutron/services/loadbalancer/agent/agent_manager.py:63:        self.plugin_rpc = agent_api.LbaasAgentApi(
+    neutron/services/loadbalancer/agent/agent_manager.py:64:            topics.LOADBALANCER_PLUGIN,
+    neutron/services/loadbalancer/agent/agent_manager.py:65:            self.context,
+    neutron/services/loadbalancer/agent/agent_manager.py:66:            self.conf.host
+    neutron/services/loadbalancer/agent/agent_manager.py:67:        )
+    neutron/services/loadbalancer/agent/agent_manager.py:68:        self._load_drivers()
+
+    neutron/services/loadbalancer/agent/agent_manager.py:84:    def _load_drivers(self):
+    neutron/services/loadbalancer/agent/agent_manager.py:86:        for driver in self.conf.device_driver:
+    neutron/services/loadbalancer/agent/agent_manager.py:99:                self.device_drivers[driver_name] = driver_inst
+
+1.    call forward: initialize_service_hook() -> sync_state() .
+    neutron/services/loadbalancer/agent/agent_manager.py:123:    def initialize_service_hook(self, started_by):
+    neutron/services/loadbalancer/agent/agent_manager.py:124:        self.sync_state()
+
+2.    call forward: sync_state() -> _reload_pool() .
+    neutron/services/loadbalancer/agent/agent_manager.py:145:    def sync_state(self)
+    neutron/services/loadbalancer/agent/agent_manager.py:153:            for pool_id in ready_instances:
+    neutron/services/loadbalancer/agent/agent_manager.py:154:                self._reload_pool(pool_id)
+
+3.    call forward: _reload_pool() -> plugin_rpc.get_logical_device() from which
+      logical config is returned,
+6.    and is used for calling deploy_instance() from the device driver.
+
+    neutron/services/loadbalancer/agent/agent_manager.py:169:    def _reload_pool(self, pool_id):
+    neutron/services/loadbalancer/agent/agent_manager.py:170:        try:
+    neutron/services/loadbalancer/agent/agent_manager.py:171:            logical_config = self.plugin_rpc.get_logical_device(pool_id)
+    neutron/services/loadbalancer/agent/agent_manager.py:172:            driver_name = logical_config['driver']
+    neutron/services/loadbalancer/agent/agent_manager.py:180:            self.device_drivers[driver_name].deploy_instance(logical_config)
+
+4.    LbaasAgentApi's get_logical_device() method (or any other method) simply
+      forwards requests to the plugin (server) side of lbass rpc, namely,
+      LoadBalancerAgentApi, and finally to
+      LoadBalancerCallbacks.get_logical_device().
+    neutron/services/loadbalancer/agent/agent_api.py:22:class LbaasAgentApi(proxy.RpcProxy):
+    neutron/services/loadbalancer/agent/agent_api.py:58:    def get_logical_device(self, pool_id):
+    neutron/services/loadbalancer/agent/agent_api.py:59:        return self.call(
+    neutron/services/loadbalancer/agent/agent_api.py:60:            self.context,
+    neutron/services/loadbalancer/agent/agent_api.py:61:            self.make_msg(
+    neutron/services/loadbalancer/agent/agent_api.py:62:                'get_logical_device',
+    neutron/services/loadbalancer/agent/agent_api.py:63:                pool_id=pool_id
+    neutron/services/loadbalancer/agent/agent_api.py:64:            ),
+    neutron/services/loadbalancer/agent/agent_api.py:65:            topic=self.topic
+    neutron/services/loadbalancer/agent/agent_api.py:66:        )
+
+5.    [server side] The logical device info is returned.
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:56:class LoadBalancerCallbacks(object):
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:93:    def get_logical_device(self, context, pool_id=None):
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:94:        with context.session.begin(subtransactions=True):
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:95:            qry = context.session.query(loadbalancer_db.Pool)
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:96:            qry = qry.filter_by(id=pool_id)
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:97:            pool = qry.one()
+*** Modification -95,12 +95,6:
+*** Here get_logical_device() is modified to solely return the logical device
+    info, with 'active pool check' moved from 'server side' to 'agent side'.
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:98:            retval = {}
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:99:            retval['pool'] = self.plugin._make_pool_dict(pool)
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:101:            if pool.vip:
+
+pre.plugin-side.agent-driver.rpc:
+      In class AgentDriverBase, set agent_rpc to an instance of
+      LoadBalancerAgentApi, the plugin side of lbaas rpc API.
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:322:class AgentDriverBase(abstract_driver.LoadBalancerAbstractDriver):
+
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:328:    def __init__(self, plugin):
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:329:        if not self.device_driver:
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:330:            raise DriverNotSpecified()
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:331:
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:332:        self.agent_rpc = LoadBalancerAgentApi(topics.LOADBALANCER_AGENT)
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:335:        self._set_callbacks_on_plugin()
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:336:        self.plugin.agent_notifiers.update(
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:337:            {q_const.AGENT_TYPE_LOADBALANCER: self.agent_rpc})
+
+pre.plugin-side.agent-driver.rpc-callback:
+      In class AgentDriverBase, set rpc callback to a LoadBalancerCallbacks
+      instance.
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:342:    def _set_callbacks_on_plugin(self):
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:347:        self.plugin.agent_callbacks = LoadBalancerCallbacks(self.plugin)
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:348:        self.plugin.conn = rpc.create_connection(new=True)
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:349:        self.plugin.conn.create_consumer(
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:350:            topics.LOADBALANCER_PLUGIN,
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:351:            self.plugin.agent_callbacks.create_rpc_dispatcher(),
+    neutron/services/loadbalancer/drivers/common/agent_driver_base.py:352:            fanout=False)
+
+pre.plugin-side.agent-driver.loading:
+      The class HaproxyOnHostPluginDriver, the server side loadbalancer
+      plugin driver that gets loaded from config file etc/neutron.conf,
+      inherits from AgentDriverBase for all the behaviors mentioned above.
+    etc/neutron.conf:452:service_provider=LOADBALANCER:Haproxy:neutron.services.loadbalancer.drivers.haproxy.plugin_driver.HaproxyOnHostPluginDriver:default
+
+    neutron/services/loadbalancer/drivers/haproxy/plugin_driver.py:22:class HaproxyOnHostPluginDriver(agent_driver_base.AgentDriverBase):
+

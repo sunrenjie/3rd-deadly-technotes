@@ -1,0 +1,10 @@
+
+[Q]: Cannot login to vm:
+
+  $ ssh fedora@192.168.1.234
+  Warning: Permanently added '192.168.1.234' (RSA) to the list of known hosts.
+  Permission denied (publickey,gssapi-keyex,gssapi-with-mic).
+[A]: Ensure that the option PasswordAuthentication is set to yes in the
+     sshd_config file on the vm.
+
+

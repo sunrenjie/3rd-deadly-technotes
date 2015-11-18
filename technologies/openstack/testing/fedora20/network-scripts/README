@@ -1,0 +1,4 @@
+Network scripts to be used AFTER devstack installation is completed.
+
+Essentially, br-ex will take the MAC (and hence IP) address of ens3, the 1st
+nic, while the latter will be given a random one.

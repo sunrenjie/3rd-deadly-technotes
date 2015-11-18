@@ -1,0 +1,88 @@
+commit 3ec30fdb4b175f2dc65261f672372bdb44dce3f9
+Author: Akihiro Motoki <motoki@da.jp.nec.com>
+Date:   Wed Mar 26 23:28:49 2014 +0900
+
+    Import request_id middleware bug fix from oslo
+    
+    There is a bug in request-id middleware that a subsequent API request will
+    overwrite a request-id of a previous request when multiple API calls are
+    processed in parallel in request_id middleware.
+    This commit imports the fix in oslo.
+    
+    cherry-picked from oslo-incubator d7bd9dc37ac3d6bc171cd2e290c772633ad20a32
+    Closes-Bug: #1289696
+    ----
+    Don't store the request ID value in middleware as class variable
+    
+    The original version of the request_id middleware generates a request ID during
+    process_request() and stores the value in a variable, so it can be attached as
+    header in process_request(). This is pretty dangerous, since subsequent
+    requests will overwrite this value, and the wrong request ID may be attached to
+    some responses. This is particularly apparent when requests arrive in parallel.
+    
+    This change replaces process_request() and process_response() with an override
+    of __call__(). This allows the generated req_id to be used in the response
+    header without needing to save it as a class-level variable.
+    ----
+    
+    Change-Id: Ic20047f604394f1ce4900c3b6a00595223804cba
+
+Notes:
+1. This change fixes an unexpected-resource-sharing bug.
+2. [context] The class Middleware implements a (base) WSGI middleware wrapper,
+   from which middleware components (used in filter sections in api-paste.ini)
+   are derived. A derived class may either use base class'es __call__() and
+   implement the two functions process_request() and process_response(), or
+   implement their own __call__(). It turned out that former approach has
+   a pitfall. By separating the two functions, request and response processing,
+   in addition to modularity, we get the shortcoming that the two functions
+   cannot share info easily. In the class RequestIdMiddleware in this case,
+   the newly generated request id, something need to be shared, is stored as
+   instance variable. Now that a common callable instance is used to handle all
+   requests, this implementation effectively has info shared among all
+   requests.
+3. [summary] The class now implements its own __call__() instead.
+4. This bug is introduced when this piece of functionality is created in
+   oslo-incubator commit 45bc08a780363573e70be87ae12bc80492758382. Then a few
+   copy-and-paste helped spread the bug to more projects. Now that the problem
+   is found by testing in nova, the fix spreads, again. It is hard to imagine
+   a veteran like Akihiro Motoki ever came up with code that violate some
+   obvious rule.
+5. The decoration webob.dec.wsgify effectively turns a request-taking,
+   response-returning function into a WSGI app.
+6. This is a good chance we get exposed to WSGI, paster deploy, and others.
+---
+ neutron/openstack/common/middleware/request_id.py | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/neutron/openstack/common/middleware/request_id.py b/neutron/openstack/common/middleware/request_id.py
+index d442faf..5c2620c 100644
+--- a/neutron/openstack/common/middleware/request_id.py
++++ b/neutron/openstack/common/middleware/request_id.py
+@@ -19,6 +19,8 @@ It ensures to assign request ID for each API request and set it to
+ request environment. The request ID is also added to API response.
+ """
+ 
++import webob.dec
++
+ from neutron.openstack.common import context
+ from neutron.openstack.common.middleware import base
+ 
+@@ -29,10 +31,11 @@ HTTP_RESP_HEADER_REQUEST_ID = 'x-openstack-request-id'
+ 
+ class RequestIdMiddleware(base.Middleware):
+ 
+-    def process_request(self, req):
+-        self.req_id = context.generate_request_id()
+-        req.environ[ENV_REQUEST_ID] = self.req_id
+-
+-    def process_response(self, response):
+-        response.headers.add(HTTP_RESP_HEADER_REQUEST_ID, self.req_id)
++    @webob.dec.wsgify
++    def __call__(self, req):
++        req_id = context.generate_request_id()
++        req.environ[ENV_REQUEST_ID] = req_id
++        response = req.get_response(self.application)
++        if HTTP_RESP_HEADER_REQUEST_ID not in response.headers:
++            response.headers.add(HTTP_RESP_HEADER_REQUEST_ID, req_id)
+         return response

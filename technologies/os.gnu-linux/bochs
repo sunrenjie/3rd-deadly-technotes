@@ -1,0 +1,48 @@
+
+bochs related stuff created @ 20120527
+
+We do observed several (or maybe actually one) potential bugs in bochs 2.4.6:
++ X86_64 versions of bochs (in Debian GNU/Linux) won't be able to run lab1cdrom
+  from mit6.828 and xv6, while i386 versions (in Debian GNU/Linux and Windows
+  XP) do.
+
+Effort to compile bochs-2.5 for i386 in Debian GNU/Linux x86_64:
++ configure: env CFLAGS="-m32" CXXFLAGS="-m32" LFLAGS="-m32" ./configure --prefix=/opt/bochs-2.5/ --host=i386
+  + to compile dbg version, add '--enable-debugger' option to configure
++ make: env CFLAGS="-m32" CXXFLAGS="-m32" LFLAGS="-m32" make install
+  + The command line used by make to generate the binary file 'bochs' when
+    '--enable-debugger' is used in configure is probably incorrect:
+g++ -o bochs -m32 -D_FILE_OFFSET_BITS=64 -D_LARGE_FILES -DBX_SHARE_PATH=\"/opt/bochs-2.5/share/bochs\" logio.o main.o config.o load32bitOShack.o pc_system.o osdep.o plugin.o crc.o -pthread -Wl,--export-dynamic  iodev/libiodev.a bx_debug/libdebug.a cpu/libcpu.a cpu/cpudb/libcpudb.a memory/libmemory.a gui/libgui.a disasm/libdisasm.a fpu/libfpu.a -lSM -lICE -lX11 -lXrandr /usr/lib/libgtk-x11-2.0.so /usr/lib/libgdk-x11-2.0.so /usr/lib/libatk-1.0.so /usr/lib/libpangoft2-1.0.so /usr/lib/libgdk_pixbuf-2.0.so -lm /usr/lib/libpangocairo-1.0.so /usr/lib/libcairo.so /usr/lib/libgio-2.0.so /usr/lib/libpango-1.0.so /usr/lib/libfreetype.so -lz -lfontconfig /usr/lib/libgobject-2.0.so /usr/lib/libgmodule-2.0.so /usr/lib/libgthread-2.0.so -lrt /usr/lib/libglib-2.0.so
+    It seems that the make system does not realize that we need to use 32-bit
+    libraries when compiling for i386 or does not realize that ia32 libraries
+    are contained in /usr/lib32 and /lib32. What we need to do is to replace
+    all the referenced 64-bit libaries with their 32-bit counterparts, and then
+    manually run the command:
+g++ -o bochs -m32 -D_FILE_OFFSET_BITS=64 -D_LARGE_FILES -DBX_SHARE_PATH=\"/opt/bochs-2.5/share/bochs\" logio.o main.o config.o load32bitOShack.o pc_system.o osdep.o plugin.o crc.o -pthread -Wl,--export-dynamic  iodev/libiodev.a bx_debug/libdebug.a cpu/libcpu.a cpu/cpudb/libcpudb.a memory/libmemory.a gui/libgui.a disasm/libdisasm.a fpu/libfpu.a -lSM -lICE -lX11 -lXrandr -lm -lz /usr/lib32/libgtk-x11-2.0.so.0 /usr/lib32/libgdk-x11-2.0.so.0 /usr/lib32/libatk-1.0.so.0 /usr/lib32/libpangoft2-1.0.so.0 /usr/lib32/libgdk_pixbuf-2.0.so.0 /usr/lib32/libpangocairo-1.0.so.0 /usr/lib32/libgio-2.0.so.0 /usr/lib32/libpango-1.0.so.0 /usr/lib32/libgobject-2.0.so.0 /usr/lib32/libgmodule-2.0.so.0 /usr/lib32/libgthread-2.0.so.0 /lib32/libglib-2.0.so.0 /usr/lib32/libcairo.so.2 /usr/lib32/libfreetype.so.6
+    Then we are done.
+
+[20141220]
+In Mac OS X, bochs' support for native GUI is incomplete. This means we'd need
+X, GTK, etc. Commands are known to work:
+./configure --enable-cdrom --with-x11 --enable-static=yes --enable-shared=no \
+--enable-gdb-stub --prefix=/Users/renjiesun/bin/bochs-2.4.6
+./configure --enable-cdrom --with-x11 --enable-static=yes --enable-shared=no \
+--enable-debugger --prefix=/Users/renjiesun/bin/bochs-dbg-2.4.6
+
+Additional info:
+1. The above commands are inspired by MacPorts configuration for bochs.
+2. The binaries are still compiled as x86_64; we are yet to figure out the
+   necessity of compiling as i386.
+
+[20150516]
+Compiling experiences of bochs 2.6.8 on mac os x convinces us to update to
+this version (compiling on Linux systems has always been trivial). Here are
+the commands:
+./configure --enable-cdrom --enable-disasm --enable-readline --with-sdl2 \
+  --prefix=/Users/renjiesun/bin/bochs-2.6.8 --enable-gdb-stub
+./configure --enable-cdrom --enable-disasm --enable-readline --with-sdl2 \
+  --prefix=/Users/renjiesun/bin/bochs-dbg-2.6.8 --enable-debugger
+
+Prerequisite: install libsdl2 and readline via Macports.
+Also, on Linux, readline-dev/readline-devel package is required.
+

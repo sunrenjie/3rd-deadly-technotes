@@ -1,0 +1,6 @@
+To login to local mysql server without typing password:
+Create a config file ~/.my.cnf with the contents:
+
+[client]
+user = root
+password = r

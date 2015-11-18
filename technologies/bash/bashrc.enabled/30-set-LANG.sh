@@ -1,0 +1,1 @@
+../bashrc.available/30-set-LANG.sh

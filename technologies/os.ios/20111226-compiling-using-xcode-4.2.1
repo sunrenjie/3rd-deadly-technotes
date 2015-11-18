@@ -1,0 +1,227 @@
+
+Dec 26, 2011
+
+Cross-compiling iPhone apps in MacOS Lion (10.7) using Xcode 4.2.1
+
+Portions stolen from here:
+http://tinsuke.wordpress.com/2011/02/17/how-to-cross-compiling-libraries-for-ios-armv6armv7i386/
+
+test.c:
+#include <stdio.h>
+
+int main(){
+	printf("Hello, world\n");
+	return(0);
+}
+
+# environment set up reflecting what's true for Xcode 4.2.1
+
+export DEVROOT="/Developer/Platforms/iPhoneOS.platform/Developer"
+export SDKROOT="$DEVROOT/SDKs/iPhoneOS5.0.sdk"
+export IOS_BASE_SDK="4.2"
+export CC="$DEVROOT/usr/bin/llvm-gcc-4.2"
+export CXX="$DEVROOT/usr/bin/llvm-g++-4.2"
+export MACROS="-U__i386__= -U__x86_64__= -D__arm__ -U__APPLE__ -U__MACH__"
+export CPP="$DEVROOT/usr/bin/llvm-cpp-4.2 -arch armv7 $MACROS"
+export LD="$DEVROOT/usr/bin/ld"
+export AR="$DEVROOT/usr/bin/ar"
+export AS="$DEVROOT/usr/bin/as"
+export NM="$DEVROOT/usr/bin/nm"
+export RANLIB="$DEVROOT/usr/bin/ranlib"
+export  CFLAGS="-arch armv7 -pipe -no-cpp-precomp -isysroot $SDKROOT $MACROS"
+export LDFLAGS="-arch armv7 -isysroot $SDKROOT"
+export CPPFLAGS="$CFLAGS"
+export CXXFLAGS="$CFLAGS"
+
+Note:
+1. This option should be added to configure to enable cross-compilation:
+'--host=arm-apple-darwin10'
+2. This option is better added to configure to disable X11 (which is enabled by
+default for many softwares) since our programs will run in ssh terminal:
+'--without-x'
+3. The compilation command better start with 'env PATH=$DEVROOT/usr/bin:$PATH',
+so that 
+--------------------------------------------------------------------------------
+Now trying to port mit-scheme:
+
+pwd=/Users/mahmood1/src/mit-scheme-c-9.1.1/src
+etc/make-liarc.sh --prefix=/Applications/mit-scheme-ios-9.1.1/ --host=arm-apple-darwin10
+./configure --prefix=/Applications/mit-scheme-ios-9.1.1/ --host=arm-apple-darwin10
+
+Q0: using native gcc:
+S0: add '--host=arm-apple-darwin10' to ./configure to enable cross-compiling
+Q1: cannot run cpp properly
+S1: add '-arch armv7 -U__i386__=  -U__x86_64__= -D__arm__' to 'export CPP=...'
+Q2: confshared.h:653:57: error: Error: confshared.h: Unknown configuration.: No such file or directory
+S2: The error code is
+652 #ifndef MACHINE_TYPE
+653 #  include "Error: confshared.h: Unknown configuration."
+654 #endif
+Where is 'MACHINE_TYPE'?
+A quick-and-dirty fix: add to CFLAGS: '-DMACHINE_TYPE=arm'
+XXX: define it for __arm__ in microcode/confshared.h; no CFLAGS required
+Q3: fasdump.c:617: error: 'CURRENT_FASL_ARCH' undeclared (first use in this function)
+S3: A quick-and-dirty fix: modify microcode/confshared.h to define to for __arm__.
+Q4: It seems __APPLE__ is seen as meaning MAC
+S4: add '-U__APPLE__' to CFLAGS
+Q5: configure blindly expect us to wish to use MACOSX SDK, while we do not
+S5: add to configure and microcode/configure the following line: 'MACOSX_SYSROOT=$SDKROOT'
+Q6: Some binaries built for temporary use are not directly executable (since we
+    are cross-compiling): gen-nonce extract-liarc-decls findprim
+S6: We need binaries executable on the compiling platform. gen-nonce extract-liarc-decls
+    are copied to the installation dir lib/mit-scheme-c/, whereas findprim is not.
+    So we need to manually copy findprim from the compilation dir to the
+    installation dir.
+    Also, we meed to modify etc/c-bundle.sh, microcode/Makefile.in and
+    microcode/makegen/Makefile.in.in accordingly to respect PATH.
+    Then we could start the building process by
+    env PATH=/Applications/mit-scheme-9.1.1/lib/mit-scheme-c/:$PATH etc/make-liarc.sh
+Q7: missing x11 libs for armv7?
+S7: Of course; how can we use x in ipad? Add '--without-x' to all invocation of
+    configure in etc/make-liarc.sh.
+Q8: A few commands require scheme in this way '../microcode/scheme'.
+S8: Indeed:
+
+renjie@debian:/tmp/mit-scheme-c-9.1.1/src$ grep -Hnr '\.\./microcode/scheme' * 2>/dev/null
+etc/make-native.sh:107:run_cmd_in_dir runtime ../microcode/scheme --library ../lib \
+etc/build-bands.sh:31:run_cmd_in_dir runtime ../microcode/scheme --library ../lib --heap 6000 \
+etc/compile-svm.sh:118:    ../microcode/scheme --library ../lib --fasl make.bin --batch-mode <<EOF
+etc/build-boot-compiler.sh:31:run_cmd_in_dir runtime ../microcode/scheme --library ../lib \
+ffi/Makefile-fragment:33:	| ../microcode/scheme --library ../lib --batch-mode
+ffi/Makefile-fragment:37:	| ../microcode/scheme --library ../lib --batch-mode
+ffi/Makefile.in:148:	| ../microcode/scheme --library ../lib --batch-mode
+ffi/Makefile.in:152:	| ../microcode/scheme --library ../lib --batch-mode
+lib/ffi/Makefile-fragment:33:	| ../microcode/scheme --library ../lib --batch-mode
+lib/ffi/Makefile-fragment:37:	| ../microcode/scheme --library ../lib --batch-mode
+lib/ffi/Makefile.in:148:	| ../microcode/scheme --library ../lib --batch-mode
+lib/ffi/Makefile.in:152:	| ../microcode/scheme --library ../lib --batch-mode
+
+Note that lib/ffi simply links to ffi:
+renjie@debian:/tmp/mit-scheme-c-9.1.1/src$ ls -l lib/ffi
+lrwxrwxrwx 1 renjie renjie 6 Dec 27 17:44 lib/ffi -> ../ffi
+
+We use shell scripts to handle this:
+(mit-scheme-c is the lisp intepreter compiled from portable C code)
+(XXX: the script is NOT repeatable!!!)
+for f in etc/make-native.sh etc/build-bands.sh etc/compile-svm.sh etc/build-boot-compiler.sh ffi/Makefile-fragment ffi/Makefile.in; do
+  cp $f $f.original
+  cat $f.original | tr -d '\r' | sed 's:\.\./microcode/scheme:mit-scheme-c:g' > $f
+done
+
+In addition, add directory of mit-scheme-c to PATH.
+
+This won't work because the make program wants to load modules just built.
+More fundamental solution required. XXX: S8 NOT SOLVED.
+
+____________________________________________________________________________
+modified files:
+configure                        # MACOSX SDK
+etc/c-bundle.sh                  # gen-nonce extract-liarc-decls
+etc/make-liarc.sh                # --without-x -host stage-signaling
+microcode/configure              # MACOSX SDK
+microcode/confshared.h           # MACHINE_TYPE for __arm__
+microcode/Makefile.in            # ./findprim => findprim
+microcode/makegen/Makefile.in.in # ./findprim => findprim
+----------------------------------------------------------------------------
+
+We now will analyze the commands in detail starting from etc/make-liarc.sh.
+
+Now run the configure and make separately:
+
+env PATH=/Applications/mit-scheme-9.1.1/lib/mit-scheme-c/:$PATH \
+./configure --prefix=`pwd`/boot-root --enable-native-code=c --disable-host-scheme-test --host=arm-apple-darwin10 --without-x
+
+env PATH=/Applications/mit-scheme-9.1.1/lib/mit-scheme-c/:$PATH \
+make stamp_install-liarc-boot-compiler
+  ./etc/build-boot-compiler.sh
+    # copy the whole dir of /Users/mahmood1/src/mit-scheme-c-9.1.1/src/boot-root to ipad
+    @runtime: ./mit-scheme-c --library ../lib --fasl http://www.gnu.org/software/mit-scheme/lib/runtime/make.so --heap 6000 --batch-mode <<EOF
+(begin
+  (load-option (quote compiler))
+  (load-option (quote cref))
+  (load-option (quote *parser))
+  (disk-save "../lib/boot-compiler.com"))
+EOF
+...
+;Package: (user)
+Unhandled signal received.
+Killed by SIGSEGV.
+
+The iOS mit-scheme fails on (quote compiler) and even (define x 1).
+More detailed analysis required.
+Effort to compile mit-scheme 9.1.1 for ABORTTED!!!
+
+--------
+
+Now try to compile a down graded version: scheme-7.7.1
+./configure --enable-native-code=c --disable-host-scheme-test --host=arm-apple-darwin10
+
+But the result revealed that it is impossible ever to compile mit-scheme for an
+unknown architecture, since there are machine-dependent code at:
+
+$ ls -1 src/compiler/machines
+alpha
+bobcat
+C
+i386
+mips
+sparc
+spectrum
+svm
+vax
+x86-64
+
+We consider it nearly impossible to create a ios-armv7 version of scheme in the
+foreseeable near future. The effort to compile mit-scheme is
+COMPLETELY ABORTTED!!!
+
+--------------------------------------------------------------------------------
+
+And then we turn to clisp-2.49. But this again failed due to architecture-dependent
+code (ariarm.*) cannot be compiled.
+
+This is the changes we have made:
+diff -r clisp-2.49_original/src/makemake.in clisp-2.49_stable/src/makemake.in
+1966c1966
+<   echol "CFLAGS = ${CFLAGS}"
+---
+>   echol "CFLAGS = ${CFLAGS} ${CPPFLAGS}"
+1971c1971
+<   echol "XCFLAGS = ${XCFLAGS}"
+---
+>   echol "XCFLAGS = ${XCFLAGS} ${CPPFLAGS}"
+1973c1973
+<   echol "XCLFLAGS = ${XCLFLAGS}"
+---
+>   echol "XCLFLAGS = ${XCLFLAGS} ${CPPFLAGS}"
+2204c2204
+< echol "COMMENT5 = ${HERE}comment5"
+---
+> echol "COMMENT5 = comment5"
+2220,2221c2220,2221
+< echol "GCTRIGGER = ${HERE}gctrigger"
+< echol "VARBRACE = ${HERE}varbrace"
+---
+> echol "GCTRIGGER = gctrigger"
+> echol "VARBRACE = varbrace"
+
+Note:
+1. Similarly, we need to compile native version of binaries and modify makefile
+   accordingly.
+2. We need to compile libiconv as a dependency.
+3. We must disable reference to libsigsegv by
+   ./configure --ignore-absence-of-libsigsegv --host=arm-apple-darwin10 --without-x
+4. There are silly compiling commands that use directly cc (which shall reference
+   /usr/bin/cc by default); work around this by
+   env PATH=$DEVROOT/usr/bin:/Users/mahmood1/src/native/clisp-2.49/src:$PATH make
+5. If we want to get this job done, we will want to modify src/ariarm.* to make
+   them work.
+6. ncurse and libiconv can be compiled smoothly without problem.
+
+We consider it nearly impossible to create a ios-armv7 version of clisp in the
+foreseeable near future. The effort to compile clisp is
+COMPLETELY ABORTTED!!!
+
+(UPDATE at 20120116: we managed to compile mit-scheme for ios-armv7 and marked
+this problem as SOLVED!!! But the Xcode environment is still valid, however.
+See the file 20120113-compiling-mit-scheme-ios .)

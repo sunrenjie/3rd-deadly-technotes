@@ -1,0 +1,74 @@
+
+On task_struct and thread_info structures in linux (v2.6.34):
+
+arch/x86/include/asm/thread_info.h:
+26 struct thread_info {
+27      struct task_struct      *task;          /* main task structure */
+28      struct exec_domain      *exec_domain;   /* execution domain */
+29      __u32                   flags;          /* low level flags */
+30      __u32                   status;         /* thread synchronous flags */
+31      __u32                   cpu;            /* current CPU */
+32      int                     preempt_count;  /* 0 => preemptable,
+33                                                 <0 => BUG */
+34      mm_segment_t            addr_limit;
+35      struct restart_block    restart_block;
+36      void __user             *sysenter_return;
+37 #ifdef CONFIG_X86_32
+38      unsigned long           previous_esp;   /* ESP of the previous stack in
+39                                                 case of nested (IRQ) stacks
+40                                              */
+41      __u8                    supervisor_stack[0];
+42 #endif
+43      int                     uaccess_err;
+44 };
+...
+169 #ifdef CONFIG_X86_32
+...
+183 /* how to get the thread information struct from C */
+184 static inline struct thread_info *current_thread_info(void)
+185 {
+186     return (struct thread_info *)
+187             (current_stack_pointer & ~(THREAD_SIZE - 1));
+188 }
+...
+192 /* how to get the thread information struct from ASM */
+193 #define GET_THREAD_INFO(reg)         \
+194     movl $-THREAD_SIZE, reg; \
+195     andl %esp, reg
+196 
+197 /* use this one if reg already contains %esp */
+198 #define GET_THREAD_INFO_WITH_ESP(reg) \
+199     andl $-THREAD_SIZE, reg
+200 
+201 #endif
+
+include/linux/sched.h:
+1170 struct task_struct {
+1171    volatile long state;    /* -1 unrunnable, 0 runnable, >0 stopped */
+1172    void *stack;
+1173    atomic_t usage;
+1174    unsigned int flags;     /* per process flags, defined below */
+1175    unsigned int ptrace;
+1176 
+1177    int lock_depth;         /* BKL lock depth */
+1178 
+1179 #ifdef CONFIG_SMP
+1180 #ifdef __ARCH_WANT_UNLOCKED_CTXSW
+1181    int oncpu;
+1182 #endif
+1183 #endif
+1258	struct task_struct *real_parent; /* real parent process */
+1259	struct task_struct *parent; /* recipient of SIGCHLD, wait4() reports */
+1265	struct task_struct *group_leader;	/* threadgroup leader */
+1508 };
+
+Notes:
+1. The definition and placement of header file reflects the need to separate
+   those data structures that are and are not architecture-dependent.
+2. The struct task_struct objects are relatively large, hence are dynamically
+   allocated (via the slab allocator) and linked together into a list.
+3. The struct thread_info objects are stored at the end of the kernel stack of
+   each process, so that it is possible to exploit architecture (say X86_32)
+   specific features to speed up some relevant calculations such as
+   determining address of struct task_struct.
+

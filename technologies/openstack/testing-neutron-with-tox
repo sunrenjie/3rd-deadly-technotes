@@ -1,0 +1,109 @@
+
+Testing neutron with tox
+
+Thu Mar 13 13:16:50 CST 2014
+
+neutron is from git://git.openstack.org/openstack/neutron.git
+HEAD branch @ master == 00281819f3707372e14005b0be8363fca17bd4e1
+
+Run test with this simple command 'tox -e py27', which will build a virtualenv
+within tests are performed. For second run with existing virtualenv, just
+activate the virtualenv by 'source .tox/py27/bin/activate', then manually type
+testr. We've got three test failures which is later reported as:
+
+(py27)r@compute1:/src/openstack/neutron$ testr failing
+======================================================================
+FAIL: neutron.tests.unit.test_wsgi.TestWSGIServer.test_start_random_port_with_ipv6
+tags: worker-5
+----------------------------------------------------------------------
+Empty attachments:
+  pythonlogging:''
+  stderr
+  stdout
+
+Traceback (most recent call last):
+  File "neutron/tests/unit/test_wsgi.py", line 68, in test_start_random_port_with_ipv6
+    server.start(None, 0, host="::1")
+  File "neutron/wsgi.py", line 209, in start
+    backlog=backlog)
+  File "neutron/wsgi.py", line 182, in _get_socket
+    eventlet.sleep(0.1)
+  File "neutron/openstack/common/excutils.py", line 68, in __exit__
+    six.reraise(self.type_, self.value, self.tb)
+  File "neutron/wsgi.py", line 174, in _get_socket
+    family=family)
+  File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/eventlet/convenience.py", line 38, in listen
+    sock.bind(addr)
+  File "/usr/lib/python2.7/socket.py", line 224, in meth
+    return getattr(self._sock,name)(*args)
+error: [Errno 99] Cannot assign requested address
+======================================================================
+FAIL: neutron.tests.unit.test_wsgi.TestWSGIServerWithSSL.test_app_using_ipv6_and_ssl
+tags: worker-5
+----------------------------------------------------------------------
+Empty attachments:
+  pythonlogging:''
+  stderr
+  stdout
+
+Traceback (most recent call last):
+  File "neutron/tests/unit/test_wsgi.py", line 1112, in test_app_using_ipv6_and_ssl
+    server.start(hello_world, 0, host="::1")
+  File "neutron/wsgi.py", line 209, in start
+    backlog=backlog)
+  File "neutron/wsgi.py", line 182, in _get_socket
+    eventlet.sleep(0.1)
+  File "neutron/openstack/common/excutils.py", line 68, in __exit__
+    six.reraise(self.type_, self.value, self.tb)
+  File "neutron/wsgi.py", line 174, in _get_socket
+    family=family)
+  File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/eventlet/convenience.py", line 38, in listen
+    sock.bind(addr)
+  File "/usr/lib/python2.7/socket.py", line 224, in meth
+    return getattr(self._sock,name)(*args)
+error: [Errno 99] Cannot assign requested address
+======================================================================
+FAIL: process-returncode
+tags: worker-5
+----------------------------------------------------------------------
+Binary content:
+  traceback (test/plain; charset=""utf8"")
+Ran 3 tests in 35.114s
+FAILED (id=0, failures=3)
+
+Turned out that our system has ipv6 disabled and the following code will
+reproduce the error:
+
+(py27)r@compute1:/src/openstack/neutron$ python
+Python 2.7.3 (default, Jan  2 2013, 13:56:14) 
+[GCC 4.7.2] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+>>> from neutron import wsgi
+>>> server = wsgi.Server("test_random_port")
+>>> server.start(None, 0, host="::1")
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "neutron/wsgi.py", line 209, in start
+    backlog=backlog)
+  File "neutron/wsgi.py", line 182, in _get_socket
+    eventlet.sleep(0.1)
+  File "neutron/openstack/common/excutils.py", line 68, in __exit__
+    six.reraise(self.type_, self.value, self.tb)
+  File "neutron/wsgi.py", line 174, in _get_socket
+    family=family)
+  File "/src/openstack/neutron/.tox/py27/local/lib/python2.7/site-packages/eventlet/convenience.py", line 38, in listen
+    sock.bind(addr)
+  File "/usr/lib/python2.7/socket.py", line 224, in meth
+    return getattr(self._sock,name)(*args)
+socket.error: [Errno 99] Cannot assign requested address
+>>> server.start(None, 0, host="127.0.0.1")
+>>> 
+
+Customization of testing environment:
+We may manually construct our own virtualenv environment and run test
+within. This has the benefit of intallation non-official pypi packages
+as you wish.
+
+Turned out that the wiki page for testr is extremely helpful:
+https://wiki.openstack.org/wiki/Testr
+

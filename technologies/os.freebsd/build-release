@@ -1,0 +1,5 @@
+
+cd /svn/base
+make buildworld buildkernel
+# su to root
+env NODOC=yes NOPORTS=yes NOSRC=yes CHROOTDIR=/svn/release make cdrom

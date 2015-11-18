@@ -1,0 +1,21 @@
+git cheat sheet
+
+[Q] How to checkout a remote branch with tracking?
+[A] git branch -t local_branch_name origin/remote_branch_name
+
+[Q] How to push to remote with a different branch name?
+[A] git push origin local_branch_name:remote_branch_name
+
+[Q] How to delete a remote branch?
+[A] git push origin --delete remote_branch_name
+
+[Q] How to merge (or pull) without a checkout?
+[A] It is impossible; have fun with checkout, merge/pull, and then checkout.
+
+[Q] How to set a local branch to track remote branch?
+[A] git branch -u upstream/foo foo
+
+[Q] How to cherry-pick a commit from another branch?
+[A] Fetch the commit hash, git checkout the working branch, execute
+    'git cherry-pick commit-hash'.
+

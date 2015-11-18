@@ -1,0 +1,1076 @@
+Change Ice44a4e2: Add enable_security_group option
+
+https://review.openstack.org/#/c/67281/
+
+Add enable_security_group option
+
+Using noop driver to disable security group is confusing.
+In this commit, we introduce enable_security_group in server side.
+
+DocImpact
+UpgradeImpact
+
+Implements bp: security-group-config-cleanup
+Related-Bug: 1112912
+Change-Id: Ice44a4e2a519c64e613eeb24372de46726473339
+
+Notes:
+1. This change implements a nontrivial feature. Alas, it is more difficult to
+   add new things to a existin great beast than to create a new one. This patch
+   do invite further improvements.
+2. [context] Security group is handled by firewall driver whose interface is
+   defined in the abstract class neutron.agent.firewall.FirewallDriver. Any
+   implementation of firewall shall inherient from this class and implement
+   the various methods. The available ones are:
+   + neutron.agent.firewall.NoopFirewallDriver, which effectively disables
+     firewall functionalities by doing nothing.
+   + neutron.agent.linux.iptables_firewall.IptablesFirewallDriver, which
+     enforces security groups through iptables rules.
+   + neutron.agent.linux.iptables_firewall.OVSHybridIptablesFirewallDriver,
+     which is based on the above one with customized _port_chain_name() and
+     _get_device_name(). This is the one used by the majority of the plugins.
+   + neutron.plugins.hyperv.agent.security_groups_driver.HyperVSecurityGroupsDriver
+     which is implemented by the plugin hyperv.
+3. [summary] A new server side, per-plugin option enable_security_group is
+   added. 
+3. The key problem is that the security group config is implied implicitly
+   by the firewall driver, and an explicit option is needed to eliminate any
+   potential confusions originated from the implication. The fact that this
+   option can be deduced from an existing one suggests that some combinations
+   are invalid and shall be dealt with properly:
+   
+    enable sg         firewall driver   accepted
+    yes               noop              N
+    yes               None              Y [1]
+    yes               others            Y
+    no                noop              Y
+    no                None              Y
+    no                others            N
+    
+    [1] I and another commenter believed this combination is invalid, yet the
+        author do not. Quoting his comment:
+        
+        We won't set this parameter in future release, so firewall_driver=None
+        is valid on server side. We won't set enable_security_group in agent
+        side.
+4. Considerations that guided this change:
+   + Default option should be present and commented out.
+   + The extension 'allowed-address-pairs' shall be disabled whenever
+     'security-group' is disabled.
+   + Change function name if working logics are changed.
+   + Try to avoid add specific features to base.TestBase; put them in specific
+     classes instead, even if that involves a lot of code copying.
+5. General principles that lead to better code:
+   + Do not explain self-documenting features. May be you want to labor on
+     related topic.
+   + Do keep ad hoc testing code in a separate space.
+   + Cover everything that is changed in commit message.
+   + Be sure to understand fully consequences implied. That means below two:
+   + Ensure backward compatibility is kept as much as possible.
+   + Change everything influenced if necessary, documents, comments, function
+     names, etc.
+   + Be sure to make default settings work.
+   + Check twice in case any confusion is introduced.
+   
+DIFF:
+diff --git a/etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini b/etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini
+index 7235476..94fe980 100644 (file)
+--- a/etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini
++++ b/etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini
+@@ -72,3 +72,7 @@
+ # Firewall driver for realizing neutron security group function
+ # firewall_driver = neutron.agent.firewall.NoopFirewallDriver
+ # Example: firewall_driver = neutron.agent.linux.iptables_firewall.IptablesFirewallDriver
++
++# Controls if neutron security group is enabled or not.
++# It should be false when you use nova security group.
++# enable_security_group = True
+diff --git a/etc/neutron/plugins/ml2/ml2_conf.ini b/etc/neutron/plugins/ml2/ml2_conf.ini
+index b8b766f..3724c72 100644 (file)
+--- a/etc/neutron/plugins/ml2/ml2_conf.ini
++++ b/etc/neutron/plugins/ml2/ml2_conf.ini
+@@ -55,3 +55,8 @@
+ #
+ # vxlan_group =
+ # Example: vxlan_group = 239.1.1.1
++
++[security_group]
++# Controls if neutron security group is enabled or not.
++# It should be false when you use nova security group.
++# enable_security_group = True
+diff --git a/etc/neutron/plugins/mlnx/mlnx_conf.ini b/etc/neutron/plugins/mlnx/mlnx_conf.ini
+index 275b727..b122511 100644 (file)
+--- a/etc/neutron/plugins/mlnx/mlnx_conf.ini
++++ b/etc/neutron/plugins/mlnx/mlnx_conf.ini
+@@ -72,3 +72,8 @@
+ # agents.
+ #
+ # rpc_support_old_agents = False
++
++[securitygroup]
++# Controls if neutron security group is enabled or not.
++# It should be false when you use nova security group.
++# enable_security_group = True
+diff --git a/etc/neutron/plugins/nec/nec.ini b/etc/neutron/plugins/nec/nec.ini
+index 9cbdbe4..af2d572 100644 (file)
+--- a/etc/neutron/plugins/nec/nec.ini
++++ b/etc/neutron/plugins/nec/nec.ini
+@@ -16,6 +16,10 @@
+ # Firewall driver for realizing neutron security group function
+ firewall_driver = neutron.agent.linux.iptables_firewall.OVSHybridIptablesFirewallDriver
+ 
++# Controls if neutron security group is enabled or not.
++# It should be false when you use nova security group.
++# enable_security_group = True
++
+ [ofc]
+ # Specify OpenFlow Controller Host, Port and Driver to connect.
+ # host = 127.0.0.1
+diff --git a/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini b/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini
+index 7c68492..50ec556 100644 (file)
+--- a/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini
++++ b/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini
+@@ -133,6 +133,10 @@
+ # firewall_driver = neutron.agent.firewall.NoopFirewallDriver
+ # Example: firewall_driver = neutron.agent.linux.iptables_firewall.OVSHybridIptablesFirewallDriver
+ 
++# Controls if neutron security group is enabled or not.
++# It should be false when you use nova security group.
++# enable_security_group = True
++
+ #-----------------------------------------------------------------------------
+ # Sample Configurations.
+ #-----------------------------------------------------------------------------
+diff --git a/etc/neutron/plugins/ryu/ryu.ini b/etc/neutron/plugins/ryu/ryu.ini
+index 72abffe..9d9cfa2 100644 (file)
+--- a/etc/neutron/plugins/ryu/ryu.ini
++++ b/etc/neutron/plugins/ryu/ryu.ini
+@@ -35,6 +35,10 @@ ovsdb_interface = eth0
+ # Firewall driver for realizing neutron security group function
+ # firewall_driver = neutron.agent.linux.iptables_firewall.OVSHybridIptablesFirewallDriver
+ 
++# Controls if neutron security group is enabled or not.
++# It should be false when you use nova security group.
++# enable_security_group = True
++
+ [agent]
+ # Agent's polling interval in seconds
+ # polling_interval = 2
+diff --git a/neutron/agent/securitygroups_rpc.py b/neutron/agent/securitygroups_rpc.py
+index 8ebf3bf..3239242 100644 (file)
+--- a/neutron/agent/securitygroups_rpc.py
++++ b/neutron/agent/securitygroups_rpc.py
+@@ -28,22 +28,49 @@ SG_RPC_VERSION = "1.1"
+ security_group_opts = [
+     cfg.StrOpt(
+         'firewall_driver',
+-        default='neutron.agent.firewall.NoopFirewallDriver',
+-        help=_('Driver for Security Groups Firewall'))
++        default=None,
++        help=_('Driver for security groups firewall in the L2 agent')),
++    cfg.BoolOpt(
++        'enable_security_group',
++        default=True,
++        help=_(
++            'Controls whether the neutron security group API is enabled '
++            'in the server. It should be false when using no security '
++            'groups or using the nova security group API.'))
+ ]
+ cfg.CONF.register_opts(security_group_opts, 'SECURITYGROUP')
+ 
+ 
++#This is backward compatibility check for Havana
++def _is_valid_driver_combination():
++    return ((cfg.CONF.SECURITYGROUP.enable_security_group and
++             cfg.CONF.SECURITYGROUP.firewall_driver !=
++             'neutron.agent.firewall.NoopFirewallDriver') or
++            (not cfg.CONF.SECURITYGROUP.enable_security_group and
++             (cfg.CONF.SECURITYGROUP.firewall_driver ==
++             'neutron.agent.firewall.NoopFirewallDriver' or
++              cfg.CONF.SECURITYGROUP.firewall_driver == None)
++             ))
++
++
+ def is_firewall_enabled():
+-    return (cfg.CONF.SECURITYGROUP.firewall_driver !=
+-            'neutron.agent.firewall.NoopFirewallDriver')
++    if not _is_valid_driver_combination():
++        LOG.warn("Driver configuration don't match with enable_security_group")
++
++    return cfg.CONF.SECURITYGROUP.enable_security_group
++
++
++def _disable_extension(extension, aliases):
++    if extension in aliases:
++        aliases.remove(extension)
+ 
+ 
+-def disable_security_group_extension_if_noop_driver(
+-    supported_extension_aliases):
++def disable_security_group_extension_by_config(aliases):
+     if not is_firewall_enabled():
+-        LOG.debug(_('Disabled security-group extension.'))
+-        supported_extension_aliases.remove('security-group')
++        LOG.info(_('Disabled security-group extension.'))
++        _disable_extension('security-group', aliases)
++        LOG.info(_('Disabled allowed-address-pairs extension.'))
++        _disable_extension('allowed-address-pairs', aliases)
+ 
+ 
+ class SecurityGroupServerRpcApiMixin(object):
+diff --git a/neutron/plugins/bigswitch/plugin.py b/neutron/plugins/bigswitch/plugin.py
+index 89c4f76..7a57fe1 100644 (file)
+--- a/neutron/plugins/bigswitch/plugin.py
++++ b/neutron/plugins/bigswitch/plugin.py
+@@ -458,7 +458,7 @@ class NeutronRestProxyV2(NeutronRestProxyV2Base,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self._aliases = aliases
+         return self._aliases
+ 
+diff --git a/neutron/plugins/linuxbridge/lb_neutron_plugin.py b/neutron/plugins/linuxbridge/lb_neutron_plugin.py
+index 5b332af..52fbdca 100644 (file)
+--- a/neutron/plugins/linuxbridge/lb_neutron_plugin.py
++++ b/neutron/plugins/linuxbridge/lb_neutron_plugin.py
+@@ -247,7 +247,7 @@ class LinuxBridgePluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self._aliases = aliases
+         return self._aliases
+ 
+diff --git a/neutron/plugins/ml2/plugin.py b/neutron/plugins/ml2/plugin.py
+index 8240e09..6636d77 100644 (file)
+--- a/neutron/plugins/ml2/plugin.py
++++ b/neutron/plugins/ml2/plugin.py
+@@ -94,7 +94,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self._aliases = aliases
+         return self._aliases
+ 
+diff --git a/neutron/plugins/mlnx/mlnx_plugin.py b/neutron/plugins/mlnx/mlnx_plugin.py
+index 7c04530..920038f 100644 (file)
+--- a/neutron/plugins/mlnx/mlnx_plugin.py
++++ b/neutron/plugins/mlnx/mlnx_plugin.py
+@@ -89,7 +89,7 @@ class MellanoxEswitchPlugin(db_base_plugin_v2.NeutronDbPluginV2,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self._aliases = aliases
+         return self._aliases
+ 
+diff --git a/neutron/plugins/nec/nec_plugin.py b/neutron/plugins/nec/nec_plugin.py
+index f19781f..fa2c10c 100644 (file)
+--- a/neutron/plugins/nec/nec_plugin.py
++++ b/neutron/plugins/nec/nec_plugin.py
+@@ -96,7 +96,7 @@ class NECPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self.remove_packet_filter_extension_if_disabled(aliases)
+             self._aliases = aliases
+         return self._aliases
+diff --git a/neutron/plugins/oneconvergence/plugin.py b/neutron/plugins/oneconvergence/plugin.py
+index 41262e7..daf85ee 100644 (file)
+--- a/neutron/plugins/oneconvergence/plugin.py
++++ b/neutron/plugins/oneconvergence/plugin.py
+@@ -124,7 +124,7 @@ class OneConvergencePluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self._aliases = aliases
+         return self._aliases
+ 
+diff --git a/neutron/plugins/openvswitch/ovs_neutron_plugin.py b/neutron/plugins/openvswitch/ovs_neutron_plugin.py
+index ff0d355..ec23da0 100644 (file)
+--- a/neutron/plugins/openvswitch/ovs_neutron_plugin.py
++++ b/neutron/plugins/openvswitch/ovs_neutron_plugin.py
+@@ -278,7 +278,7 @@ class OVSNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self._aliases = aliases
+         return self._aliases
+ 
+diff --git a/neutron/plugins/ryu/ryu_neutron_plugin.py b/neutron/plugins/ryu/ryu_neutron_plugin.py
+index 5eaf277..e2d0ab2 100644 (file)
+--- a/neutron/plugins/ryu/ryu_neutron_plugin.py
++++ b/neutron/plugins/ryu/ryu_neutron_plugin.py
+@@ -104,7 +104,7 @@ class RyuNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+     def supported_extension_aliases(self):
+         if not hasattr(self, '_aliases'):
+             aliases = self._supported_extension_aliases[:]
+-            sg_rpc.disable_security_group_extension_if_noop_driver(aliases)
++            sg_rpc.disable_security_group_extension_by_config(aliases)
+             self._aliases = aliases
+         return self._aliases
+ 
+diff --git a/neutron/tests/unit/bigswitch/test_restproxy_plugin.py b/neutron/tests/unit/bigswitch/test_restproxy_plugin.py
+index 96141c5..061ae89 100644 (file)
+--- a/neutron/tests/unit/bigswitch/test_restproxy_plugin.py
++++ b/neutron/tests/unit/bigswitch/test_restproxy_plugin.py
+@@ -37,6 +37,9 @@ class BigSwitchProxyPluginV2TestCase(test_base.BigSwitchTestBase,
+                                      test_plugin.NeutronDbPluginV2TestCase):
+ 
+     def setUp(self, plugin_name=None):
++        if hasattr(self, 'HAS_PORT_FILTER'):
++            cfg.CONF.set_override(
++                'enable_security_group', self.HAS_PORT_FILTER, 'SECURITYGROUP')
+         self.setup_config_files()
+         self.setup_patches()
+         if plugin_name:
+@@ -72,6 +75,10 @@ class TestBigSwitchProxyPortsV2(test_plugin.TestPortsV2,
+     VIF_TYPE = portbindings.VIF_TYPE_OVS
+     HAS_PORT_FILTER = False
+ 
++    def setUp(self, plugin_name=None):
++        super(TestBigSwitchProxyPortsV2,
++              self).setUp(self._plugin_name)
++
+     def test_update_port_status_build(self):
+         with self.port() as port:
+             self.assertEqual(port['port']['status'], 'BUILD')
+diff --git a/neutron/tests/unit/hyperv/test_hyperv_neutron_agent.py b/neutron/tests/unit/hyperv/test_hyperv_neutron_agent.py
+index cee443c..d030498 100644 (file)
+--- a/neutron/tests/unit/hyperv/test_hyperv_neutron_agent.py
++++ b/neutron/tests/unit/hyperv/test_hyperv_neutron_agent.py
+@@ -53,7 +53,9 @@ class TestHyperVNeutronAgent(base.BaseTestCase):
+         mock.patch('neutron.openstack.common.loopingcall.'
+                    'FixedIntervalLoopingCall',
+                    new=MockFixedIntervalLoopingCall)
+-
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         self.agent = hyperv_neutron_agent.HyperVNeutronAgent()
+         self.agent.plugin_rpc = mock.Mock()
+         self.agent.sec_groups_agent = mock.MagicMock()
+diff --git a/neutron/tests/unit/linuxbridge/test_lb_neutron_agent.py b/neutron/tests/unit/linuxbridge/test_lb_neutron_agent.py
+index 9ecd715..0e21c95 100644 (file)
+--- a/neutron/tests/unit/linuxbridge/test_lb_neutron_agent.py
++++ b/neutron/tests/unit/linuxbridge/test_lb_neutron_agent.py
+@@ -98,6 +98,9 @@ class TestLinuxBridgeAgent(base.BaseTestCase):
+         super(TestLinuxBridgeAgent, self).setUp()
+         cfg.CONF.set_override('rpc_backend',
+                               'neutron.openstack.common.rpc.impl_fake')
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         self.execute_p = mock.patch.object(ip_lib.IPWrapper, '_execute')
+         self.execute = self.execute_p.start()
+         self.addCleanup(self.execute_p.stop)
+diff --git a/neutron/tests/unit/linuxbridge/test_linuxbridge_plugin.py b/neutron/tests/unit/linuxbridge/test_linuxbridge_plugin.py
+index 5ef072b..3ff0f75 100644 (file)
+--- a/neutron/tests/unit/linuxbridge/test_linuxbridge_plugin.py
++++ b/neutron/tests/unit/linuxbridge/test_linuxbridge_plugin.py
+@@ -16,6 +16,7 @@
+ import contextlib
+ 
+ import mock
++from oslo.config import cfg
+ 
+ from neutron.common import constants as q_const
+ from neutron.extensions import portbindings
+@@ -65,15 +66,20 @@ class TestLinuxBridgePortBinding(LinuxBridgePluginV2TestCase,
+                                  test_bindings.PortBindingsTestCase):
+     VIF_TYPE = portbindings.VIF_TYPE_BRIDGE
+     HAS_PORT_FILTER = True
++    ENABLE_SG = True
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_IPTABLES_DRIVER
+ 
+     def setUp(self):
+         test_sg_rpc.set_firewall_driver(self.FIREWALL_DRIVER)
++        cfg.CONF.set_override(
++            'enable_security_group', self.ENABLE_SG,
++            group='SECURITYGROUP')
+         super(TestLinuxBridgePortBinding, self).setUp()
+ 
+ 
+ class TestLinuxBridgePortBindingNoSG(TestLinuxBridgePortBinding):
+     HAS_PORT_FILTER = False
++    ENABLE_SG = False
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_NOOP_DRIVER
+ 
+ 
+diff --git a/neutron/tests/unit/ml2/test_ml2_plugin.py b/neutron/tests/unit/ml2/test_ml2_plugin.py
+index 275bada..2c0c3ec 100644 (file)
+--- a/neutron/tests/unit/ml2/test_ml2_plugin.py
++++ b/neutron/tests/unit/ml2/test_ml2_plugin.py
+@@ -125,10 +125,14 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
+     # to bind port
+     VIF_TYPE = portbindings.VIF_TYPE_UNBOUND
+     HAS_PORT_FILTER = False
++    ENABLE_SG = True
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_HYBRID_DRIVER
+ 
+     def setUp(self, firewall_driver=None):
+         test_sg_rpc.set_firewall_driver(self.FIREWALL_DRIVER)
++        config.cfg.CONF.set_override(
++            'enable_security_group', self.ENABLE_SG,
++            group='SECURITYGROUP')
+         super(TestMl2PortBinding, self).setUp()
+ 
+     def _check_port_binding_profile(self, port, profile=None):
+@@ -171,6 +175,7 @@ class TestMl2PortBinding(Ml2PluginV2TestCase,
+ 
+ class TestMl2PortBindingNoSG(TestMl2PortBinding):
+     HAS_PORT_FILTER = False
++    ENABLE_SG = False
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_NOOP_DRIVER
+ 
+ 
+diff --git a/neutron/tests/unit/mlnx/test_mlnx_neutron_agent.py b/neutron/tests/unit/mlnx/test_mlnx_neutron_agent.py
+index ace306c..a1c60de 100644 (file)
+--- a/neutron/tests/unit/mlnx/test_mlnx_neutron_agent.py
++++ b/neutron/tests/unit/mlnx/test_mlnx_neutron_agent.py
+@@ -32,6 +32,9 @@ class TestEswitchAgent(base.BaseTestCase):
+         # Avoid rpc initialization for unit tests
+         cfg.CONF.set_override('rpc_backend',
+                               'neutron.openstack.common.rpc.impl_fake')
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+ 
+         class MockFixedIntervalLoopingCall(object):
+             def __init__(self, f):
+diff --git a/neutron/tests/unit/mlnx/test_mlnx_plugin.py b/neutron/tests/unit/mlnx/test_mlnx_plugin.py
+index ffa541f..f3c83ac 100644 (file)
+--- a/neutron/tests/unit/mlnx/test_mlnx_plugin.py
++++ b/neutron/tests/unit/mlnx/test_mlnx_plugin.py
+@@ -13,6 +13,7 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
++from oslo.config import cfg
+ from webob import exc
+ 
+ from neutron.extensions import portbindings
+@@ -54,8 +55,15 @@ class TestMlnxNetworksV2(test_plugin.TestNetworksV2, MlnxPluginV2TestCase):
+ class TestMlnxPortBinding(MlnxPluginV2TestCase,
+                           test_bindings.PortBindingsTestCase):
+     VIF_TYPE = constants.VIF_TYPE_DIRECT
++    ENABLE_SG = False
+     HAS_PORT_FILTER = False
+ 
++    def setUp(self, firewall_driver=None):
++        cfg.CONF.set_override(
++            'enable_security_group', self.ENABLE_SG,
++            group='SECURITYGROUP')
++        super(TestMlnxPortBinding, self).setUp()
++
+     def _check_default_port_binding_profole(self, port,
+                                             expected_vif_type=None):
+         if expected_vif_type is None:
+@@ -98,6 +106,7 @@ class TestMlnxPortBinding(MlnxPluginV2TestCase,
+ 
+ class TestMlnxPortBindingNoSG(TestMlnxPortBinding):
+     HAS_PORT_FILTER = False
++    ENABLE_SG = False
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_NOOP_DRIVER
+ 
+ 
+diff --git a/neutron/tests/unit/nec/test_nec_agent.py b/neutron/tests/unit/nec/test_nec_agent.py
+index 1506884..51915df 100644 (file)
+--- a/neutron/tests/unit/nec/test_nec_agent.py
++++ b/neutron/tests/unit/nec/test_nec_agent.py
+@@ -37,6 +37,9 @@ class TestNecAgentBase(base.BaseTestCase):
+ 
+     def setUp(self):
+         super(TestNecAgentBase, self).setUp()
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         cfg.CONF.set_override('rpc_backend',
+                               'neutron.openstack.common.rpc.impl_fake')
+         cfg.CONF.set_override('host', 'dummy-host')
+diff --git a/neutron/tests/unit/nec/test_portbindings.py b/neutron/tests/unit/nec/test_portbindings.py
+index 559f8aa..4b13764 100644 (file)
+--- a/neutron/tests/unit/nec/test_portbindings.py
++++ b/neutron/tests/unit/nec/test_portbindings.py
+@@ -17,6 +17,7 @@
+ #
+ # @author: Akihiro Motoki, NEC Corporation
+ 
++from oslo.config import cfg
+ from testtools import matchers
+ from webob import exc
+ 
+@@ -32,15 +33,20 @@ class TestNecPortBinding(test_bindings.PortBindingsTestCase,
+                          test_nec_plugin.NecPluginV2TestCase):
+     VIF_TYPE = portbindings.VIF_TYPE_OVS
+     HAS_PORT_FILTER = True
++    ENABLE_SG = True
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_HYBRID_DRIVER
+ 
+     def setUp(self):
+         test_sg_rpc.set_firewall_driver(self.FIREWALL_DRIVER)
++        cfg.CONF.set_override(
++            'enable_security_group', self.ENABLE_SG,
++            group='SECURITYGROUP')
+         super(TestNecPortBinding, self).setUp()
+ 
+ 
+ class TestNecPortBindingNoSG(TestNecPortBinding):
+     HAS_PORT_FILTER = False
++    ENABLE_SG = False
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_NOOP_DRIVER
+ 
+ 
+diff --git a/neutron/tests/unit/ofagent/test_ofa_neutron_agent.py b/neutron/tests/unit/ofagent/test_ofa_neutron_agent.py
+index 3c3d552..ae685a5 100644 (file)
+--- a/neutron/tests/unit/ofagent/test_ofa_neutron_agent.py
++++ b/neutron/tests/unit/ofagent/test_ofa_neutron_agent.py
+@@ -41,6 +41,9 @@ class OFAAgentTestCase(base.BaseTestCase):
+ 
+     def setUp(self):
+         super(OFAAgentTestCase, self).setUp()
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         self.fake_oflib_of = fake_oflib.patch_fake_oflib_of().start()
+         self.mod_agent = importutils.import_module(self._AGENT_NAME)
+         self.ryuapp = mock.Mock()
+diff --git a/neutron/tests/unit/oneconvergence/test_nvsd_agent.py b/neutron/tests/unit/oneconvergence/test_nvsd_agent.py
+index 2559f9c..2243aa6 100644 (file)
+--- a/neutron/tests/unit/oneconvergence/test_nvsd_agent.py
++++ b/neutron/tests/unit/oneconvergence/test_nvsd_agent.py
+@@ -33,6 +33,9 @@ class TestOneConvergenceAgentBase(base.BaseTestCase):
+ 
+     def setUp(self):
+         super(TestOneConvergenceAgentBase, self).setUp()
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         cfg.CONF.set_override('rpc_backend',
+                               'neutron.openstack.common.rpc.impl_fake')
+         with contextlib.nested(
+diff --git a/neutron/tests/unit/openvswitch/test_openvswitch_plugin.py b/neutron/tests/unit/openvswitch/test_openvswitch_plugin.py
+index 6d76cde..234a8fe 100644 (file)
+--- a/neutron/tests/unit/openvswitch/test_openvswitch_plugin.py
++++ b/neutron/tests/unit/openvswitch/test_openvswitch_plugin.py
+@@ -13,6 +13,8 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
++from oslo.config import cfg
++
+ from neutron.extensions import portbindings
+ from neutron.tests.unit import _test_extension_portbindings as test_bindings
+ from neutron.tests.unit import test_db_plugin as test_plugin
+@@ -58,15 +60,20 @@ class TestOpenvswitchPortBinding(OpenvswitchPluginV2TestCase,
+                                  test_bindings.PortBindingsTestCase):
+     VIF_TYPE = portbindings.VIF_TYPE_OVS
+     HAS_PORT_FILTER = True
++    ENABLE_SG = True
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_HYBRID_DRIVER
+ 
+     def setUp(self, firewall_driver=None):
+         test_sg_rpc.set_firewall_driver(self.FIREWALL_DRIVER)
++        cfg.CONF.set_override(
++            'enable_security_group', self.ENABLE_SG,
++            group='SECURITYGROUP')
+         super(TestOpenvswitchPortBinding, self).setUp()
+ 
+ 
+ class TestOpenvswitchPortBindingNoSG(TestOpenvswitchPortBinding):
+     HAS_PORT_FILTER = False
++    ENABLE_SG = False
+     FIREWALL_DRIVER = test_sg_rpc.FIREWALL_NOOP_DRIVER
+ 
+ 
+diff --git a/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py b/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py
+index dc6723c..885c889 100644 (file)
+--- a/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py
++++ b/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py
+@@ -88,6 +88,9 @@ class TestOvsNeutronAgent(base.BaseTestCase):
+         notifier_cls = notifier_p.start()
+         self.notifier = mock.Mock()
+         notifier_cls.return_value = self.notifier
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         # Avoid rpc initialization for unit tests
+         cfg.CONF.set_override('rpc_backend',
+                               'neutron.openstack.common.rpc.impl_fake')
+@@ -786,6 +789,9 @@ class AncillaryBridgesTest(base.BaseTestCase):
+         notifier_cls = notifier_p.start()
+         self.notifier = mock.Mock()
+         notifier_cls.return_value = self.notifier
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         # Avoid rpc initialization for unit tests
+         cfg.CONF.set_override('rpc_backend',
+                               'neutron.openstack.common.rpc.impl_fake')
+diff --git a/neutron/tests/unit/openvswitch/test_ovs_tunnel.py b/neutron/tests/unit/openvswitch/test_ovs_tunnel.py
+index 8de601a..0397c5a 100644 (file)
+--- a/neutron/tests/unit/openvswitch/test_ovs_tunnel.py
++++ b/neutron/tests/unit/openvswitch/test_ovs_tunnel.py
+@@ -66,6 +66,9 @@ class TunnelTest(base.BaseTestCase):
+ 
+     def setUp(self):
+         super(TunnelTest, self).setUp()
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         cfg.CONF.set_override('rpc_backend',
+                               'neutron.openstack.common.rpc.impl_fake')
+         cfg.CONF.set_override('report_interval', 0, 'AGENT')
+diff --git a/neutron/tests/unit/test_security_groups_rpc.py b/neutron/tests/unit/test_security_groups_rpc.py
+index 63cbb4a..14e0f1c 100644 (file)
+--- a/neutron/tests/unit/test_security_groups_rpc.py
++++ b/neutron/tests/unit/test_security_groups_rpc.py
+@@ -24,6 +24,7 @@ from oslo.config import cfg
+ from testtools import matchers
+ import webob.exc
+ 
++from neutron.agent.common import config
+ from neutron.agent import firewall as firewall_base
+ from neutron.agent.linux import iptables_manager
+ from neutron.agent import rpc as agent_rpc
+@@ -53,6 +54,9 @@ class FakeSGCallback(sg_db_rpc.SecurityGroupServerRpcCallbackMixin):
+ 
+ class SGServerRpcCallBackMixinTestCase(test_sg.SecurityGroupDBTestCase):
+     def setUp(self, plugin=None):
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         super(SGServerRpcCallBackMixinTestCase, self).setUp(plugin)
+         self.rpc = FakeSGCallback()
+ 
+@@ -504,6 +508,9 @@ class SGAgentRpcCallBackMixinTestCase(base.BaseTestCase):
+ class SecurityGroupAgentRpcTestCase(base.BaseTestCase):
+     def setUp(self, defer_refresh_firewall=False):
+         super(SecurityGroupAgentRpcTestCase, self).setUp()
++        cfg.CONF.set_default('firewall_driver',
++                             'neutron.agent.firewall.NoopFirewallDriver',
++                             group='SECURITYGROUP')
+         self.agent = sg_rpc.SecurityGroupAgentRpcMixin()
+         self.agent.context = None
+         mock.patch('neutron.agent.linux.iptables_manager').start()
+@@ -1432,6 +1439,10 @@ class TestSecurityGroupAgentWithIptables(base.BaseTestCase):
+ 
+     def setUp(self, defer_refresh_firewall=False):
+         super(TestSecurityGroupAgentWithIptables, self).setUp()
++        config.register_root_helper(cfg.CONF)
++        cfg.CONF.set_override(
++            'lock_path',
++            '$state_path/lock')
+         cfg.CONF.set_override(
+             'firewall_driver',
+             self.FIREWALL_DRIVER,
+@@ -1683,24 +1694,65 @@ class TestSecurityGroupAgentWithOVSIptables(
+ 
+ 
+ class TestSecurityGroupExtensionControl(base.BaseTestCase):
+-    def test_firewall_enabled_noop_driver(self):
+-        set_firewall_driver(FIREWALL_NOOP_DRIVER)
+-        self.assertFalse(sg_rpc.is_firewall_enabled())
+-
+-    def test_firewall_enabled_iptables_driver(self):
+-        set_firewall_driver(FIREWALL_IPTABLES_DRIVER)
+-        self.assertTrue(sg_rpc.is_firewall_enabled())
+-
+-    def test_disable_security_group_extension_noop_driver(self):
+-        set_firewall_driver(FIREWALL_NOOP_DRIVER)
++    def test_disable_security_group_extension_by_config(self):
++        cfg.CONF.set_override(
++            'enable_security_group', False,
++            group='SECURITYGROUP')
+         exp_aliases = ['dummy1', 'dummy2']
+         ext_aliases = ['dummy1', 'security-group', 'dummy2']
+-        sg_rpc.disable_security_group_extension_if_noop_driver(ext_aliases)
++        sg_rpc.disable_security_group_extension_by_config(ext_aliases)
+         self.assertEqual(ext_aliases, exp_aliases)
+ 
+-    def test_disable_security_group_extension_iptables_driver(self):
+-        set_firewall_driver(FIREWALL_IPTABLES_DRIVER)
++    def test_enable_security_group_extension_by_config(self):
++        cfg.CONF.set_override(
++            'enable_security_group', True,
++            group='SECURITYGROUP')
+         exp_aliases = ['dummy1', 'security-group', 'dummy2']
+         ext_aliases = ['dummy1', 'security-group', 'dummy2']
+-        sg_rpc.disable_security_group_extension_if_noop_driver(ext_aliases)
++        sg_rpc.disable_security_group_extension_by_config(ext_aliases)
+         self.assertEqual(ext_aliases, exp_aliases)
++
++    def test_is_invalid_drvier_combination_sg_enabled(self):
++        cfg.CONF.set_override(
++            'enable_security_group', True,
++            group='SECURITYGROUP')
++        cfg.CONF.set_override(
++            'firewall_driver', 'neutron.agent.firewall.NoopFirewallDriver',
++            group='SECURITYGROUP')
++        self.assertFalse(sg_rpc._is_valid_driver_combination())
++
++    def test_is_invalid_drvier_combination_sg_disabled(self):
++        cfg.CONF.set_override(
++            'enable_security_group', False,
++            group='SECURITYGROUP')
++        cfg.CONF.set_override(
++            'firewall_driver', 'NonNoopDriver',
++            group='SECURITYGROUP')
++        self.assertFalse(sg_rpc._is_valid_driver_combination())
++
++    def test_is_valid_drvier_combination_sg_enabled(self):
++        cfg.CONF.set_override(
++            'enable_security_group', True,
++            group='SECURITYGROUP')
++        cfg.CONF.set_override(
++            'firewall_driver', 'NonNoopDriver',
++            group='SECURITYGROUP')
++        self.assertTrue(sg_rpc._is_valid_driver_combination())
++
++    def test_is_valid_drvier_combination_sg_disabled(self):
++        cfg.CONF.set_override(
++            'enable_security_group', False,
++            group='SECURITYGROUP')
++        cfg.CONF.set_override(
++            'firewall_driver', 'neutron.agent.firewall.NoopFirewallDriver',
++            group='SECURITYGROUP')
++        self.assertTrue(sg_rpc._is_valid_driver_combination())
++
++    def test_is_valid_drvier_combination_sg_disabled_with_none(self):
++        cfg.CONF.set_override(
++            'enable_security_group', False,
++            group='SECURITYGROUP')
++        cfg.CONF.set_override(
++            'firewall_driver', None,
++            group='SECURITYGROUP')
++        self.assertTrue(sg_rpc._is_valid_driver_combination())
+
+===============================================
+APPEIDIX A. Selected nontrivial inline comments
+
+______________________________________ 5/neutron/agent/securitygroups_rpc.py:
+Akihiro Motoki		Feb 14
+
+While the option name is self-descriptive, I still think it is better the help
+text should describe it.
+
+Controls if neutron security group is enabled or not.  It should be false if
+you use nova security group.
+	
+Édouard Thuleau		Feb 14
+
+If the 'enable_security_group' is False, the security group is handled by Nova.
+So the extension 'allowed-address-pairs' will not work and we should removed it
+if it's supported by the plugin.
+
+______________________________________ 6//COMMIT_MSG
+
+mark mcclain		Feb 23
+
+Please add DocImpact to the commit message.
+				
+Akihiro Motoki		Feb 24
+
+UpgradeImpact is also needed? I am not sure if this flag works but I was
+suggested previously.
+				
+Nachi Ueno		Feb 25
+
+I'll add both
+
+______________________________________ 10/neutron/agent/securitygroups_rpc.py
+
+Armando Migliaccio		Feb 26
+
+I guess this was never documented in neutron.conf, or I am a bit confused: can
+these two options co-exist?
+				
+Nachi Ueno		Feb 26
+
+It is documented in the plugin.conf For example
+https://github.com/openstack/neutron/blob/master/etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini#L71
+
+This option will be needed when we support OpenFlow based security group
+implementation.
+
+______________________________________ 18/neutron/agent/securitygroups_rpc.py:
+
+mark mcclain		Mar 1
+
+Hmmm... Seems like we should warn when sec is enabled and default few driver is
+noop.
+				
+Akihiro Motoki		Mar 1
+
+The original problem is that it is confusing security group is disabled if noop
+driver is used. Thus this behavior does not solve the problem.
+
+I think there are the following other options.
+
+    (a) Honor enable_security_group only. Log warning if enable_security_group
+    is True and noop_driver is used. (the behavior is incompatible with havana)
+    (perhaps same as mark suggested above) (b) Change enable_security_group to
+    force_enable_security_group. is_firewall_enabled() will be: return
+    (force_enable_security_group or firewall_driver != noop_driver)
+
+Personally I prefer option (a) because it address the original problem
+(confusing behavior that sg ext is disabled based on firewall_driver) and the
+case we discussed seems not so important for most operators, though it is
+incompatible with havana release.
+
+Thought?
+				
+Nachi Ueno		Mar 4
+
+I prefer (a) too. I wanna also ask Mark's input
+
+______________________________________ 19/etc/neutron.conf:
+
+Aaron Rosen		Mar 4
+
+This should only go in plugins config file's that would want something like
+this. Having it here assumes that this disables the security_group extension
+for all plugins which isn't true.
+				
+Nachi Ueno		Mar 7
+
+Done
+
+______________________________________ 19/neutron/agent/securitygroups_rpc.py
+
+Salvatore Orlando		Mar 5
+
+as you are adding a further option, and defaulting it to True, does it still
+make sense to default to NoOp?
+
+Also, does the combination enable_security_group=True
+firewall_driver=neutron.agent.firewall.NoopFirewallDriver
+
+make sense? I think it might be ok default firewall driver to None now, and
+raise an error at startup because if enable_security_group=True then you must
+have a firewall driver.
+
+alternatively, you can use the iptables driver as default or if you really want
+to be clever allow each plugin to select a driver when firewall_driver=None
+				
+Nachi Ueno		Mar 7
+
+Thanks. I'll choose firewall_driver=None.
+
+______________________________________ 22/etc/neutron/plugins/vmware/nsx.ini:
+
+Armando Migliaccio		Mar 8
+
+copying this all over the place does sound a waste. Wouldn't it be better to
+move it to neutron.conf?
+				
+Akihiro Motoki		Mar 8
+
+It was suggested by Aaron in patch set 19. IMO neutron.conf sounds reasonable
+because it is not specific to some plugin.
+				
+Armando Migliaccio		Mar 9
+
+Oh! Let me bring Aaron's comment here: [ This should only go in plugins config
+file's that would want something like this. Having it here assumes that this
+disables the security_group extension for all plugins which isn't true. ]
+
+Copying the config option into each ini file does not buy us anything though,
+it's just duplication, is that right? It's not like we can run multiple plugins
+at the same time.
+
+If I understood what Aaron is saying, maybe he wanted to imply that some
+plugins may not implement the security group extension, in which case having a
+global config may be confusing. However, if I understand the patch correctly if
+a plugin does not implement the extension the config value is ineffective
+regardless the value.
+				
+Akihiro Motoki		Mar 9
+
+I remember the background of Aaron's comment.
+
+enable_security_group option is defined in agent/secrutiy_group_rpc.py and it
+means this option is defined only in plugins with agent-based security group
+implementation.
+
+I checked this patch and this option is only available for bigswitch,
+linuxbridge, ml2, ovs, mlnx, nec, ryu plugins. It is not enabled at least
+vmware nsx plugin and perhaps it applies to cisco and brocade plugins.
+
+If we use the current implementation, it should be placed in plugin.ini.
+Otherwise, this option needs to be defined in other places and common on all
+plugins.
+				
+Aaron Rosen		Mar 11
+
+right, this won't disable security groups for the nsx plugin. Also, ports and
+other resources will still have the default security group. I don't think we
+want this.
+				
+Nachi Ueno		Mar 12
+
+So what I should do is remove this from nsx.conf and nicira.conf?
+				
+Armando Migliaccio		Mar 12
+
+that sounds about right :)
+
+__________________________________ 25/etc/neutron/plugins/brocade/brocade.ini
+
+Akihiro Motoki		Mar 13
+
+there is no change in the code of brocade plugin. Does this option work? If
+not, i would suggest to remove it.
+
+______________________________________ 25/etc/neutron/plugins/ml2/ml2_conf.ini
+
+Xu Han Peng		Mar 13
+
+I think setting enable_security_group=True here and also setting it to False in
+line 64 may confuses user about the default value. It's hard to tell the
+default value from config file itself. Can we just use one value in the config
+file as default value?
+				
+Nachi Ueno		Mar 13
+
+This is not default value but a configuration example. so I think it is good
+think to show how to use parameters.
+				
+Akihiro Motoki		Mar 13
+
+Please consider the following. It is copied from the option definition in
+securitygroup_rpc.py. I think it address the comment.
+
+[security_group]
+# Controls if neutron security group is enabled or not.  It should be false
+# when you use nova security group.
+enable_security_gruop = True
+				
+Nachi Ueno		Mar 14
+
+Done
+
+______________________________________ 25/neutron/agent/securitygroups_rpc.py
+
+Xu Han Peng		Mar 13
+
+What about enable_security_group=True and firewall_driver=None? I think this
+combination is not valid but the current code doesn't prevent this.
+				
+Nachi Ueno		Mar 13
+
+We won't set this parameter in future release, so firewall_driver=None is valid
+on server side. We won't set enable_security_group in agent side.
+
+______________________________________
+25/neutron/tests/unit/test_security_groups_rpc.py
+
+Paul Michali		Mar 13
+
+Change all these to assertTrue/assertFalse
+				
+Nachi Ueno		Mar 14
+
+Done
+
+______________________________________ 28/neutron/tests/base.py
+
+Akihiro Motoki		Mar 14
+
+In general, base.TestBase should not contain settings for specific feature.
+Can't we do this in base test class for portbinding?
+				
+Nachi Ueno		Mar 15
+
+Not only portbinding but really many class uses this option.. Since it is a
+kind of common option and we are checking existence for the parameter, I think
+it is OK to have it here
+				
+Akihiro Motoki		Mar 15
+
+I still think it is not a good solution since this class is originally intended
+to be used for both functional and unit tests. I haven't investigated which
+tests are affected. Could you add TODO comment here if you want to go as-is?
+You can assign me :-)
+				
+Nachi Ueno		Mar 19
+
+Sorry It was my mistake. There was not so much dependencies. I'll fix this in
+next patch
+
+______________________________________
+29/etc/neutron/plugins/linuxbridge/linuxbridge_conf.ini
+
+	
+Akihiro Motoki		Mar 19
+
+According to our convention, an option with the default value should be
+commented out.
+				
+Berezovsky Irena		Mar 19
+
+Good comment. It's actually relevant to all etc/... files in the patch.
+				
+Nachi Ueno		Mar 19
+
+I got it. I just followed this comment.
+
+https://review.openstack.org/#/c/67281/25/etc/neutron/plugins/ml2/ml2_conf.ini
+				
+Akihiro Motoki		Mar 19
+
+Woops.... sorry for confusion. I just wanted to suggest removing
+"enable_security_group = False".
+
+______________________________________ 32/neutron/agent/securitygroups_rpc.py
+
+Robert Kukura		Mar 21
+
+This looks like it will result in a warning when enable_security_group == False
+and firewall_driver == None (the default). Isn't that a perfectly legal and
+common combination? I think if enable_security_group == False, then any value
+should be allowed for firewall_driver.
+				
+Nachi Ueno		Mar 21
+
+Good point. I think False & Noop or False and None should be valid value. I'll
+update test and this code
+
+______________________________________ 33/etc/neutron/plugins/ryu/ryu.ini
+
+Sumit Naiksatam		Mar 22
+
+Shouldn't this config be added to some of the other plugins' config files too?
+For example, I don't see it for the bigswitch plugin's restproxy.ini config
+file.
+				
+Kevin Benton		Mar 22
+
+Yes. Since this adds configuration based logic to the Big Switch plugin, the
+[securitygroup] section should be added to the default restproxy.ini as well.
+
+______________________________________ 33/neutron/agent/securitygroups_rpc.py
+
+	
+Robert Kukura		Mar 21
+
+I think:
+
+return ((cfg.CONF.SECURITYGROUP.enable_security_group and
+'neutron.agent.firewall.NoopFirewallDriver') or not
+cfg.CONF.SECURITYGROUP.enable_security_group)
+
+would be sufficient, but I think this is fine too.
+

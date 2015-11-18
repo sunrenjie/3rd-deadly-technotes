@@ -1,0 +1,6 @@
+To chainload grldr using syslinux, append these lines to /syslinux/txt.cfg
+(or other appropriate configuration file):
+label grldr
+  menu grldr
+  COM32 /syslinux/chain.c32
+  APPEND grldr=/syslinux/grldr

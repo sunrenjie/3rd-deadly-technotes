@@ -1,0 +1,8 @@
+To configure NetworkManager not to manage certain interfaces:
+
+For example, if we'd like to have the interfaces 'virbr0' and 'enp9so' left
+unmanaged, use the option unmanaged-devices in /etc/NetworkManager.conf:
+
+[keyfile]
+unmanaged-devices=interface-name:virbr0;interface-name:enp9s0
+

@@ -1,0 +1,69 @@
+
+The Networking service, code-named Neutron, provides an API that lets you define network connectivity and addressing in the cloud. The Networking service enables operators to leverage different networking technologies to power their cloud networking. The Networking service also provides an API to configure and manage a variety of network services ranging from L3 forwarding and NAT to load balancing, edge firewalls, and IPSEC VPN.
+
+Resource 	Description
+Network 	An isolated L2 segment, analogous to VLAN in the physical networking world.
+Subnet 	A block of v4 or v6 IP addresses and associated configuration state.
+Port 	A connection point for attaching a single device, such as the NIC of a virtual server, to a virtual network. Also describes the associated network configuration, such as the MAC and IP addresses to be used on that port.
+
+In the Havana release, OpenStack Networking introduces the Modular Layer 2 (ML2) plug-in that enables the use of multiple concurrent mechanism drivers. This capability aligns with the complex requirements typically found in large heterogeneous environments. It currently works with the existing Open vSwitch, Linux Bridge, and Hyper-v L2 agents. The ML2 framework simplifies the addition of support for new L2 technologies and reduces the effort that is required to add and maintain them compared to earlier large plug-ins.
+
+
+Configure OVS plug-in
+
+If you use the Open vSwitch (OVS) plug-in in a deployment with multiple hosts, you must use either tunneling or vlans to isolate traffic from multiple networks. Tunneling is easier to deploy because it does not require configuring VLANs on network switches.
+
+This procedure uses tunneling:
+
+Procedure 7.3. To configure OpenStack Networking to use the OVS plug-in
+
+    Edit /etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini to specify these values (for database configuration, see Install Networking Services in Installation Guide):
+
+    enable_tunneling=True
+    tenant_network_type=gre
+    tunnel_id_ranges=1:1000
+    # only required for nodes running agents
+    local_ip=<data-net-IP-address-of-node>
+
+    If you use the neutron DHCP agent, add these lines to the /etc/neutron/dhcp_agent.ini file:
+
+    dnsmasq_config_file=/etc/neutron/dnsmasq-neutron.conf
+
+    Create /etc/neutron/dnsmasq-neutron.conf, and add these values to lower the MTU size on instances and prevent packet fragmentation over the GRE tunnel:
+
+    dhcp-option-force=26,1400
+
+    Restart to apply the new settings:
+
+    $ sudo service neutron-server restart
+
+Plug-ins typically have requirements for particular software that must be run on each node that handles data packets. This includes any node that runs nova-compute and nodes that run dedicated OpenStack Networking service agents such as neutron-dhcp-agent, neutron-l3-agent, neutron-metering-agent or neutron-lbaas-agent.
+
+A data-forwarding node typically has a network interface with an IP address on the “management network” and another interface on the “data network”.
+
+Procedure 7.12. To install the L3 agent for all other plug-ins
+
+    Install the neutron-l3-agent binary on the network node:
+
+    $ sudo apt-get install neutron-l3-agent
+
+    To uplink the node that runs neutron-l3-agent to the external network, create a bridge named "br-ex" and attach the NIC for the external network to this bridge.
+
+    For example, with Open vSwitch and NIC eth1 connected to the external network, run:
+
+    $ sudo ovs-vsctl add-br br-ex
+
+    $ sudo ovs-vsctl add-port br-ex eth1
+
+    Do not manually configure an IP address on the NIC connected to the external network for the node running neutron-l3-agent. Rather, you must have a range of IP addresses from the external network that can be used by OpenStack Networking for routers that uplink to the external network. This range must be large enough to have an IP address for each router in the deployment, as well as each floating IP.
+
+    The neutron-l3-agent uses the Linux IP stack and iptables to perform L3 forwarding and NAT. In order to support multiple routers with potentially overlapping IP addresses, neutron-l3-agent defaults to using Linux network namespaces to provide isolated forwarding contexts. As a result, the IP addresses of routers are not visible simply by running the ip addr list or ifconfig command on the node. Similarly, you cannot directly ping fixed IPs.
+
+    To do either of these things, you must run the command within a particular network namespace for the router. The namespace has the name "qrouter-<UUID of the router>. These example commands run in the router namespace with UUID 47af3868-0fa8-4447-85f6-1304de32153b:
+
+    # ip netns exec qrouter-47af3868-0fa8-4447-85f6-1304de32153b ip addr list
+
+    # ip netns exec qrouter-47af3868-0fa8-4447-85f6-1304de32153b ping <fixed-ip>
+
+If you reboot a node that runs the L3 agent, you must run the neutron-ovs-cleanup command before the neutron-l3-agent service starts.
+

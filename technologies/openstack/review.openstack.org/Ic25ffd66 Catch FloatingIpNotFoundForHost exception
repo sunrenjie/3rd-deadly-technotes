@@ -1,0 +1,76 @@
+Ic25ffd66: Catch FloatingIpNotFoundForHost exception
+
+Commit message:
+Catch FloatingIpNotFoundForHost exception
+
+When showing floating ips for a given host, the FloatingIpNotFoundForHost
+exception isn't handled when no floating ips can be found for the host.
+This patch fixes this bug.
+
+Closes-Bug: #1289164
+Change-Id: Ic25ffd66945fd40ba10d69515e0cbfeae840313c
+
+DIFFs:
+diff --git a/nova/api/openstack/compute/contrib/floating_ips_bulk.py b/nova/api/openstack/compute/contrib/floating_ips_bulk.py
+index a93effb..a781633 100644 (file)
+--- a/nova/api/openstack/compute/contrib/floating_ips_bulk.py
++++ b/nova/api/openstack/compute/contrib/floating_ips_bulk.py
+@@ -50,13 +50,16 @@ class FloatingIPBulkController(object):
+     def _get_floating_ip_info(self, context, host=None):
+         floating_ip_info = {"floating_ip_info": []}
+ 
+-        try:
+-            if host is None:
++        if host is None:
++            try:
+                 floating_ips = db.floating_ip_get_all(context)
+-            else:
++            except exception.NoFloatingIpsDefined:
++                return floating_ip_info
++        else:
++            try:
+                 floating_ips = db.floating_ip_get_all_by_host(context, host)
+-        except exception.NoFloatingIpsDefined:
+-            return floating_ip_info
++            except exception.FloatingIpNotFoundForHost as e:
++                raise webob.exc.HTTPNotFound(explanation=e.format_message())
+ 
+         for floating_ip in floating_ips:
+             instance_uuid = None
+Note:
+1. Previously, exception NoFloatingIpsDefined is expected no matter whether
+   host is None or not. But this is an obvious bug, as
+   floating_ip_get_all_by_host() actually raises the exception
+   FloatingIpNotFoundForHost.
+
+    948 @require_admin_context
+    949 def floating_ip_get_all_by_host(context, host):
+    950     floating_ip_refs = _floating_ip_get_all(context).\
+    951                             filter_by(host=host).\
+    952                             all()
+    953     if not floating_ip_refs:
+    954         raise exception.FloatingIpNotFoundForHost(host=host)
+    955     return floating_ip_refs
+
+
+
+diff --git a/nova/tests/api/openstack/compute/contrib/test_floating_ip_bulk.py b/nova/tests/api/openstack/compute/contrib/test_floating_ip_bulk.py
+index 5521edd..126b626 100644 (file)
+--- a/nova/tests/api/openstack/compute/contrib/test_floating_ip_bulk.py
++++ b/nova/tests/api/openstack/compute/contrib/test_floating_ip_bulk.py
+@@ -77,6 +77,14 @@ class FloatingIPBulk(test.TestCase):
+ 
+         self.assertEqual(res_dict, response)
+ 
++    def test_list_ip_by_host(self):
++        ip_range = '192.168.1.1/28'
++        self._setup_floating_ips(ip_range)
++        req = fakes.HTTPRequest.blank('/v2/fake/os-floating-ips-bulk',
++                                      use_admin_context=True)
++        self.assertRaises(webob.exc.HTTPNotFound,
++                          self.controller.show, req, 'host')
++
+     def test_delete_ips(self):
+         ip_range = '192.168.1.0/20'
+         self._setup_floating_ips(ip_range)
+

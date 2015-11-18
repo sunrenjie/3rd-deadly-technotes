@@ -1,0 +1,297 @@
+commit 843e60b7901deb3ecbff81c2e057b8d186b9fc34
+Author: Aaron Rosen <aaronorosen@gmail.com>
+Date:   Wed Mar 26 16:40:09 2014 -0700
+
+    Prevent cross plugging router ports from other tenants
+    
+    Previously, a tenant could plug an interface into another tenant's
+    router if he knew their router_id by creating a port with the correct
+    device_id and device_owner. This patch prevents this from occuring
+    by preventing non-admin users from creating ports with device_owner
+    network:router_interface with a device_id that matches another tenants router.
+    In addition, it prevents one from updating a ports device_owner and device_id
+    so that the device_id won't match another tenants router with device_owner
+    being network:router_interface.
+    
+    NOTE: with this change it does open up the possiblity for a tenant to discover
+    router_id's of another tenant's by guessing them and updating a port till
+    a conflict occurs. That said, randomly guessing the router id would be hard
+    and in theory should not matter if exposed. We also need to allow a tenant
+    to update the device_id on network:router_interface ports as this would be
+    used for by anyone using a vm as a service router. This issue will be fixed in
+    another patch upstream as a db migration is required but since this needs
+    to be backported to all stable branches this is not possible.
+    
+    NOTE: The only plugins affect by this are the ones that use the l3-agent.
+    
+    NOTE: **One should perform and audit of the ports that are already
+            attached to routers after applying this patch and remove ports
+            that a tenant may have cross plugged.**
+    
+    Change-Id: I8bc6241f537d937e5729072dcc76871bf407cdb3
+    Closes-bug: #1243327
+
+Notes:
+1. This change enhances security in the resource management. It somehow
+   reflected lack of tenant-based security models in the original design.
+2. [context] Previously, a context creating or updating router interface ports
+   of different tenant ID is silently allowed, violating separation by tenant
+   ID.
+3. [summary] Now such cross-tenant modifications are prohibited. 
+---
+ neutron/common/exceptions.py         |  5 +++++
+ + Defined a new exception DeviceIDNotOwnedByTenant.
+ neutron/db/db_base_plugin_v2.py      | 62 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ + Added a new function _enforce_device_owner_not_router_intf_or_device_id
+   that enforces that tenant ID of the request context is the same as that
+   of the requested router interface port, if device owner or device id is to
+   be updated, or if new router interface port is created.
+ + create_port() and update_port() are modified to call
+   _enforce_device_owner_not_router_intf_or_device_id if necessary.
+ neutron/tests/unit/test_l3_plugin.py | 56 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 123 insertions(+)
+
+diff --git a/neutron/common/exceptions.py b/neutron/common/exceptions.py
+index 0a89221..bfd267e 100644
+--- a/neutron/common/exceptions.py
++++ b/neutron/common/exceptions.py
+@@ -314,3 +314,8 @@ class VxlanNetworkUnsupported(NeutronException):
+ 
+ class DuplicatedExtension(NeutronException):
+     message = _("Found duplicate extension: %(alias)s")
++
++
++class DeviceIDNotOwnedByTenant(Conflict):
++    message = _("The following device_id %(device_id)s is not owned by your "
++                "tenant or matches another tenants router.")
+diff --git a/neutron/db/db_base_plugin_v2.py b/neutron/db/db_base_plugin_v2.py
+index 1b586fd..a3ab7fd 100644
+--- a/neutron/db/db_base_plugin_v2.py
++++ b/neutron/db/db_base_plugin_v2.py
+@@ -26,14 +26,18 @@ from sqlalchemy.orm import exc
+ from neutron.api.v2 import attributes
+ from neutron.common import constants
+ from neutron.common import exceptions as n_exc
++from neutron import context as ctx
+ from neutron.db import api as db
+ from neutron.db import models_v2
+ from neutron.db import sqlalchemyutils
++from neutron.extensions import l3
++from neutron import manager
+ from neutron import neutron_plugin_base_v2
+ from neutron.notifiers import nova
+ from neutron.openstack.common import excutils
+ from neutron.openstack.common import log as logging
+ from neutron.openstack.common import uuidutils
++from neutron.plugins.common import constants as service_constants
+ 
+ 
+ LOG = logging.getLogger(__name__)
+@@ -1325,6 +1329,9 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
+         # NOTE(jkoelker) Get the tenant_id outside of the session to avoid
+         #                unneeded db action if the operation raises
+         tenant_id = self._get_tenant_id_for_create(context, p)
++        if p.get('device_owner') == constants.DEVICE_OWNER_ROUTER_INTF:
++            self._enforce_device_owner_not_router_intf_or_device_id(context, p,
++                                                                    tenant_id)
+ 
+         with context.session.begin(subtransactions=True):
+             network = self._get_network(context, network_id)
+@@ -1388,6 +1395,23 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
+         changed_ips = False
+         with context.session.begin(subtransactions=True):
+             port = self._get_port(context, id)
++            if 'device_owner' in p:
++                current_device_owner = p['device_owner']
++                changed_device_owner = True
++            else:
++                current_device_owner = port['device_owner']
++                changed_device_owner = False
++            if p.get('device_id') != port['device_id']:
++                changed_device_id = True
++
++            # if the current device_owner is ROUTER_INF and the device_id or
++            # device_owner changed check device_id is not another tenants
++            # router
++            if ((current_device_owner == constants.DEVICE_OWNER_ROUTER_INTF)
++                    and (changed_device_id or changed_device_owner)):
++                self._enforce_device_owner_not_router_intf_or_device_id(
++                    context, p, port['tenant_id'], port)
++
+             # Check if the IPs need to be updated
+             if 'fixed_ips' in p:
+                 changed_ips = True
+@@ -1485,3 +1509,41 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
+ 
+     def get_ports_count(self, context, filters=None):
+         return self._get_ports_query(context, filters).count()
++
++    def _enforce_device_owner_not_router_intf_or_device_id(self, context,
++                                                           port_request,
++                                                           tenant_id,
++                                                           db_port=None):
++        if not context.is_admin:
++            # find the device_id. If the call was update_port and the
++            # device_id was not passed in we use the device_id from the
++            # db.
++            device_id = port_request.get('device_id')
++            if not device_id and db_port:
++                device_id = db_port.get('device_id')
++            # check to make sure device_id does not match another tenants
++            # router.
++            if device_id:
++                if hasattr(self, 'get_router'):
++                    try:
++                        ctx_admin = ctx.get_admin_context()
++                        router = self.get_router(ctx_admin, device_id)
++                    except l3.RouterNotFound:
++                        return
++                else:
++                    l3plugin = (
++                        manager.NeutronManager.get_service_plugins().get(
++                            service_constants.L3_ROUTER_NAT))
++                    if l3plugin:
++                        try:
++                            ctx_admin = ctx.get_admin_context()
++                            router = l3plugin.get_router(ctx_admin,
++                                                         device_id)
++                        except l3.RouterNotFound:
++                            return
++                    else:
++                        # raise as extension doesn't support L3 anyways.
++                        raise n_exc.DeviceIDNotOwnedByTenant(
++                            device_id=device_id)
++                if tenant_id != router['tenant_id']:
++                    raise n_exc.DeviceIDNotOwnedByTenant(device_id=device_id)
+diff --git a/neutron/tests/unit/test_l3_plugin.py b/neutron/tests/unit/test_l3_plugin.py
+index bcaf7ce..d04cf34 100644
+--- a/neutron/tests/unit/test_l3_plugin.py
++++ b/neutron/tests/unit/test_l3_plugin.py
+@@ -923,6 +923,62 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
+                 gw_info = body['router']['external_gateway_info']
+                 self.assertIsNone(gw_info)
+ 
++    def test_create_router_port_with_device_id_of_other_teants_router(self):
++        with self.router() as admin_router:
++            with self.network(tenant_id='tenant_a',
++                              set_context=True) as n:
++                with self.subnet(network=n):
++                    self._create_port(
++                        self.fmt, n['network']['id'],
++                        tenant_id='tenant_a',
++                        device_id=admin_router['router']['id'],
++                        device_owner='network:router_interface',
++                        set_context=True,
++                        expected_res_status=exc.HTTPConflict.code)
++
++    def test_create_non_router_port_device_id_of_other_teants_router_update(
++        self):
++        # This tests that HTTPConflict is raised if we create a non-router
++        # port that matches the device_id of another tenants router and then
++        # we change the device_owner to be network:router_interface.
++        with self.router() as admin_router:
++            with self.network(tenant_id='tenant_a',
++                              set_context=True) as n:
++                with self.subnet(network=n):
++                    port_res = self._create_port(
++                        self.fmt, n['network']['id'],
++                        tenant_id='tenant_a',
++                        device_id=admin_router['router']['id'],
++                        set_context=True)
++                    port = self.deserialize(self.fmt, port_res)
++                    neutron_context = context.Context('', 'tenant_a')
++                    data = {'port': {'device_owner':
++                                     'network:router_interface'}}
++                    self._update('ports', port['port']['id'], data,
++                                 neutron_context=neutron_context,
++                                 expected_code=exc.HTTPConflict.code)
++                    self._delete('ports', port['port']['id'])
++
++    def test_update_port_device_id_to_different_tenants_router(self):
++        with self.router() as admin_router:
++            with self.router(tenant_id='tenant_a',
++                             set_context=True) as tenant_router:
++                with self.network(tenant_id='tenant_a',
++                                  set_context=True) as n:
++                    with self.subnet(network=n) as s:
++                        port = self._router_interface_action(
++                            'add', tenant_router['router']['id'],
++                            s['subnet']['id'], None, tenant_id='tenant_a')
++                        neutron_context = context.Context('', 'tenant_a')
++                        data = {'port':
++                                {'device_id': admin_router['router']['id']}}
++                        self._update('ports', port['port_id'], data,
++                                     neutron_context=neutron_context,
++                                     expected_code=exc.HTTPConflict.code)
++                        self._router_interface_action(
++                            'remove', tenant_router['router']['id'],
++                            s['subnet']['id'], None, tenant_id='tenant_a')
++
+     def test_router_add_gateway_invalid_network_returns_404(self):
+         with self.router() as r:
+             self._add_external_gateway_to_router(
+
+_______________________________________________________________________________
+APPENDIX How is _enforce_device_owner_not_router_intf_or_device_id implemented?
+
+This function enforces the policy that if a non-admin context is to create a
+router interface port or update device_id or device owner of such a port, it
+must has the same tenant id as the port; otherwise an
+n_exc.DeviceIDNotOwnedByTenant is raised.
+It is called by update_port() and create_port(). In the latter case, db_port is
+None, that is, existing port info from the db is not referenced.
+    neutron/db/db_base_plugin_v2.py:1512:    def _enforce_device_owner_not_router_intf_or_device_id(self, context,
+    neutron/db/db_base_plugin_v2.py:1513:                                                           port_request,
+    neutron/db/db_base_plugin_v2.py:1514:                                                           tenant_id,
+    neutron/db/db_base_plugin_v2.py:1515:                                                           db_port=None):
+This if-clause can be rewritten as:
+if context.is_admin:
+    return
+...
+This way the main body does not need that much indention. It is unimaginable
+that a veteran like Aaron Rosen ever come up with such naive code.
+    neutron/db/db_base_plugin_v2.py:1516:        if not context.is_admin:
+    neutron/db/db_base_plugin_v2.py:1517:            # find the device_id. If the call was update_port and the
+    neutron/db/db_base_plugin_v2.py:1518:            # device_id was not passed in we use the device_id from the
+    neutron/db/db_base_plugin_v2.py:1519:            # db.
+    neutron/db/db_base_plugin_v2.py:1520:            device_id = port_request.get('device_id')
+    neutron/db/db_base_plugin_v2.py:1521:            if not device_id and db_port:
+    neutron/db/db_base_plugin_v2.py:1522:                device_id = db_port.get('device_id')
+    neutron/db/db_base_plugin_v2.py:1523:            # check to make sure device_id does not match another tenants
+    neutron/db/db_base_plugin_v2.py:1524:            # router.
+Only check further if there is some device.
+This if-clause again can be rewritten as:
+if device_id:
+    return
+...
+    neutron/db/db_base_plugin_v2.py:1525:            if device_id:
+A plugin class inheriting this one might implement this method. This if-clause
+makes such check. As of now, the plugins that do so are meta, vmware nsx. This
+makes sense, as it is generally not recommended for core plugin to implement l3
+functionalities like get_router().
+    neutron/db/db_base_plugin_v2.py:1526:                if hasattr(self, 'get_router'):
+    neutron/db/db_base_plugin_v2.py:1527:                    try:
+Admin context is required to perform arbitrary query info.
+    neutron/db/db_base_plugin_v2.py:1528:                        ctx_admin = ctx.get_admin_context()
+    neutron/db/db_base_plugin_v2.py:1529:                        router = self.get_router(ctx_admin, device_id)
+    neutron/db/db_base_plugin_v2.py:1530:                    except l3.RouterNotFound:
+    neutron/db/db_base_plugin_v2.py:1531:                        return
+    neutron/db/db_base_plugin_v2.py:1532:                else:
+Alternatively, the dedicated l3 service plugin used to invoke get_router().
+    neutron/db/db_base_plugin_v2.py:1533:                    l3plugin = (
+    neutron/db/db_base_plugin_v2.py:1534:                        manager.NeutronManager.get_service_plugins().get(
+    neutron/db/db_base_plugin_v2.py:1535:                            service_constants.L3_ROUTER_NAT))
+    neutron/db/db_base_plugin_v2.py:1536:                    if l3plugin:
+    neutron/db/db_base_plugin_v2.py:1537:                        try:
+    neutron/db/db_base_plugin_v2.py:1538:                            ctx_admin = ctx.get_admin_context()
+    neutron/db/db_base_plugin_v2.py:1539:                            router = l3plugin.get_router(ctx_admin,
+    neutron/db/db_base_plugin_v2.py:1540:                                                         device_id)
+    neutron/db/db_base_plugin_v2.py:1541:                        except l3.RouterNotFound:
+    neutron/db/db_base_plugin_v2.py:1542:                            return
+    neutron/db/db_base_plugin_v2.py:1543:                    else:
+    neutron/db/db_base_plugin_v2.py:1544:                        # raise as extension doesn't support L3 anyways.
+    neutron/db/db_base_plugin_v2.py:1545:                        raise n_exc.DeviceIDNotOwnedByTenant(
+    neutron/db/db_base_plugin_v2.py:1546:                            device_id=device_id)
+    neutron/db/db_base_plugin_v2.py:1547:                if tenant_id != router['tenant_id']:
+    neutron/db/db_base_plugin_v2.py:1548:                    raise n_exc.DeviceIDNotOwnedByTenant(device_id=device_id)
+

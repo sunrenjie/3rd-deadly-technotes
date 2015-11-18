@@ -1,0 +1,66 @@
+
+20111209
+
+Trvial details in lab1.
+
+1. The JOS code is quite well written, to the effect that we could parse it.
+   For one thing, the function definition is uniformly well-structured:
+
+   return_type
+   function_name(args, ...)
+
+   This is exploited by us to answer the question
+   "Explain the interface between printf.c and console.c":
+
+   grep ')$' < ../kern/console.c | grep '^[a-z]' | sed 's:(: :' | \
+   awk '{print $1}' | while read l; do echo $l; grep -Hin $l printf.c ; done
+
+   The result is illustrating:
+
+   cputchar
+   printf.c:2:// based on printfmt() and the kernel console's cputchar().
+   printf.c:12:    cputchar(ch);
+
+   Also, searching definition for a particular function name is as easy as
+
+   grep -Hinr function_name *
+
+2. Wanted: a program that could parse c program and tell me about the
+   dependency among a jungle of functions.
+
+3. Explain the following from kern/console.c:
+
+   1   if (crt_pos >= CRT_SIZE) {
+   2     int i;
+   3
+   4     memcpy(crt_buf, crt_buf + CRT_COLS, (CRT_SIZE - CRT_COLS) * sizeof(uint16_t));
+   5     for (i = CRT_SIZE - CRT_COLS; i < CRT_SIZE; i++)
+   6       crt_buf[i] = 0x0700 | ' ';
+   7     crt_pos -= CRT_COLS;
+   8   }
+
+   First of all, let's list helping details.
+   I. Constants CRT_ROWS, CRT_COLS, CRT_SIZE defined in <kern/console.h>:
+     16 #define CRT_ROWS     25
+     17 #define CRT_COLS     80
+     18 #define CRT_SIZE     (CRT_ROWS * CRT_COLS)
+   are numbers of 16-bit unit; thus comes the definitions
+     114 static uint16_t *crt_buf;
+     115 static uint16_t crt_pos;
+   crt_buf, after initialization, always points to the start of screen buffer.
+   crt_pos, therefore, holds the index of the next position to be written.
+
+   Now, the above code obviously does the following: when the screen buffer is
+   filled (despite '>='), 'scroll' the screen content by one line:
+   1) copy contents of lines 2 .. CRT_ROWS to lines 1 .. CRT_ROWS-1
+   2) clear the last line (according to comments above, 0x0700 stands for the
+      color 'black on white'; working on the higher byte)
+   3) reset crt_pos
+
+4. What's the difference between printf() and cprintf()?
+
+   (Stolen from http://answers.yahoo.com/question/index?qid=20090221102912AAkBqmX)
+   cprintf is to the console while printf is to the stdout (standard output).
+   The only difference is stdout can be redirected but the console cannot.
+
+5. 

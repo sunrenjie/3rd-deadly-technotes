@@ -1,0 +1,14 @@
+$svn blame sys/geom/multipath/g_multipath.c -r 260882 | less -S
+
+205847     mjacob       gp = g_multipath_find_geom(mp, mpname);
+205847     mjacob       if (gp == NULL) {
+205847     mjacob               gctl_error(req, "Device %s is invalid", mpname);
+167050     mjacob               return;
+167050     mjacob       }
+227464        mav       sc = gp->softc;
+
+Note:
+1. This is an obvious error corrected in r260883.
+2. Interestingly, this is spotted by clang static analyzer.
+
+See also: http://svnweb.freebsd.org/base?view=revision&revision=260883

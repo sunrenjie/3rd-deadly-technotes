@@ -1,0 +1,240 @@
+commit 083324df06828e1b8fb97220b7415c2a28ee16c4
+Author: Kevin Benton <blak111@gmail.com>
+Date:   Thu Mar 20 06:48:45 2014 -0700
+
+    Big Switch Plugin: No REST port delete on net del
+    
+    Moves the REST call for port deletion out of the
+    _delete_port method into the delete_port method
+    so it doesn't get called during a delete_network
+    operation. The backend controller automatically
+    removes ports that are a member of a network when
+    it's deleted.
+    
+    Closes-Bug: #1295438
+    Change-Id: Ic09eb722f8e9bd3ce298dee90d8415cda1a1aa7a
+
+Notes:
+1. This change eliminates the unnecessary invoking of REST call for port
+   deletion in a delete_network operation, which is unnecessary. This bug
+   reflects inadequate of policy design and implementation.
+2. [context] Previously, call to delete_network() on behalf of
+   NeutronRestProxyV2 instance will make REST call for port deletion. This is
+   unnecessary, since 'the backend controller automatically removes ports that
+   are a member of a network when it's deleted.'
+3. [summary] Now in the NeutronRestProxyV2 class the port deletion REST call is
+   moved from _delete_port() to delete_port() and the function _delete_port()
+   itself is removed, such that port deletion REST call is no longer made when
+   delete_network() is called.
+---
+ neutron/plugins/bigswitch/plugin.py | 18 +++++-------------
+ + In class NeutronRestProxyV2, the major functionality of _delete_port() is
+   moved to delete_port() such that call of self._delete_port() now references
+   base class method.
+ 1 file changed, 5 insertions(+), 13 deletions(-)
+
+diff --git a/neutron/plugins/bigswitch/plugin.py b/neutron/plugins/bigswitch/plugin.py
+index ff6a289..cdf8d2d 100644
+--- a/neutron/plugins/bigswitch/plugin.py
++++ b/neutron/plugins/bigswitch/plugin.py
+@@ -801,19 +801,11 @@ class NeutronRestProxyV2(NeutronRestProxyV2Base,
+         with context.session.begin(subtransactions=True):
+             self.disassociate_floatingips(context, port_id)
+             self._delete_port_security_group_bindings(context, port_id)
+-            super(NeutronRestProxyV2, self).delete_port(context, port_id)
+-
+-    def _delete_port(self, context, port_id):
+-        port = super(NeutronRestProxyV2, self).get_port(context, port_id)
+-
+-        # Tenant ID must come from network in case the network is shared
+-        tenant_id = self._get_port_net_tenantid(context, port)
+-
+-        # Delete from DB
+-        ret_val = super(NeutronRestProxyV2,
+-                        self)._delete_port(context, port_id)
+-        self.servers.rest_delete_port(tenant_id, port['network_id'], port_id)
+-        return ret_val
++            port = super(NeutronRestProxyV2, self).get_port(context, port_id)
++            # Tenant ID must come from network in case the network is shared
++            tenid = self._get_port_net_tenantid(context, port)
++            self._delete_port(context, port_id)
++            self.servers.rest_delete_port(tenid, port['network_id'], port_id)
+ 
+     def create_subnet(self, context, subnet):
+         LOG.debug(_("NeutronRestProxyV2: create_subnet() called"))
+
+_______________________________________________________________________________
+APPENDIX Code analysis
+
+The implications of the removal of the function
+NeutronRestProxyV2._delete_port()
+
+NeutronRestProxyV2.delete_network() calls its couterpart from the base class,
+NeutronDbPluginV2.delete_network(), which calls self._delete_port() for all
+ports in the network. Now that `self' here is a NeutronRestProxyV2 object,
+NeutronRestProxyV2._delete_port() (which contains REST call to port delete)
+will be called if it exists. By deleting this function,
+NeutronDbPluginV2._delete_port() (which does not contain REST call) is called
+instead.
+
+neutron/db/db_base_plugin_v2.py:209:class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
+neutron/db/db_base_plugin_v2.py:210:                        CommonDbMixin):
+
+neutron/db/db_base_plugin_v2.py:990:    def delete_network(self, context, id):
+neutron/db/db_base_plugin_v2.py:991:        with context.session.begin(subtransactions=True):
+neutron/db/db_base_plugin_v2.py:992:            network = self._get_network(context, id)
+neutron/db/db_base_plugin_v2.py:993:
+neutron/db/db_base_plugin_v2.py:994:            filters = {'network_id': [id]}
+neutron/db/db_base_plugin_v2.py:995:            # NOTE(armando-migliaccio): stick with base plugin
+neutron/db/db_base_plugin_v2.py:996:            query = context.session.query(
+neutron/db/db_base_plugin_v2.py:997:                models_v2.Port).enable_eagerloads(False)
+neutron/db/db_base_plugin_v2.py:998:            ports = self._apply_filters_to_query(
+neutron/db/db_base_plugin_v2.py:999:                query, models_v2.Port, filters).with_lockmode('update')
+neutron/db/db_base_plugin_v2.py:1000:
+neutron/db/db_base_plugin_v2.py:1001:            # check if there are any tenant owned ports in-use
+neutron/db/db_base_plugin_v2.py:1002:            only_auto_del = all(p['device_owner'] in AUTO_DELETE_PORT_OWNERS
+neutron/db/db_base_plugin_v2.py:1003:                                for p in ports)
+neutron/db/db_base_plugin_v2.py:1004:
+neutron/db/db_base_plugin_v2.py:1005:            if not only_auto_del:
+neutron/db/db_base_plugin_v2.py:1006:                raise n_exc.NetworkInUse(net_id=id)
+neutron/db/db_base_plugin_v2.py:1007:
+neutron/db/db_base_plugin_v2.py:1008:            # clean up network owned ports
+neutron/db/db_base_plugin_v2.py:1009:            for port in ports:
+neutron/db/db_base_plugin_v2.py:1010:                self._delete_port(context, port['id'])
+neutron/db/db_base_plugin_v2.py:1011:
+neutron/db/db_base_plugin_v2.py:1012:            # clean up subnets
+neutron/db/db_base_plugin_v2.py:1013:            subnets_qry = context.session.query(models_v2.Subnet)
+neutron/db/db_base_plugin_v2.py:1014:            subnets_qry.filter_by(network_id=id).delete()
+neutron/db/db_base_plugin_v2.py:1015:            context.session.delete(network)
+
+neutron/db/db_base_plugin_v2.py:1438:    def delete_port(self, context, id):
+neutron/db/db_base_plugin_v2.py:1439:        with context.session.begin(subtransactions=True):
+neutron/db/db_base_plugin_v2.py:1440:            self._delete_port(context, id)
+
+neutron/db/db_base_plugin_v2.py:1458:    def _delete_port(self, context, id):
+neutron/db/db_base_plugin_v2.py:1459:        query = (context.session.query(models_v2.Port).
+neutron/db/db_base_plugin_v2.py:1460:                 enable_eagerloads(False).filter_by(id=id))
+neutron/db/db_base_plugin_v2.py:1461:        if not context.is_admin:
+neutron/db/db_base_plugin_v2.py:1462:            query = query.filter_by(tenant_id=context.tenant_id)
+neutron/db/db_base_plugin_v2.py:1463:        query.delete()
+
+neutron/plugins/bigswitch/plugin.py:455:class NeutronRestProxyV2(NeutronRestProxyV2Base,
+neutron/plugins/bigswitch/plugin.py:456:                         addr_pair_db.AllowedAddressPairsMixin,
+neutron/plugins/bigswitch/plugin.py:457:                         extradhcpopt_db.ExtraDhcpOptMixin,
+neutron/plugins/bigswitch/plugin.py:458:                         agentschedulers_db.DhcpAgentSchedulerDbMixin,
+neutron/plugins/bigswitch/plugin.py:459:                         sg_rpc_base.SecurityGroupServerRpcMixin):
+
+neutron/plugins/bigswitch/plugin.py:601:    # NOTE(kevinbenton): workaround for eventlet/mysql deadlock
+neutron/plugins/bigswitch/plugin.py:602:    @utils.synchronized('bsn-port-barrier')
+neutron/plugins/bigswitch/plugin.py:603:    def delete_network(self, context, net_id):
+neutron/plugins/bigswitch/plugin.py:604:        """Delete a network.
+neutron/plugins/bigswitch/plugin.py:605:        :param context: neutron api request context
+neutron/plugins/bigswitch/plugin.py:606:        :param id: UUID representing the network to delete.
+neutron/plugins/bigswitch/plugin.py:607:
+neutron/plugins/bigswitch/plugin.py:608:        :returns: None
+neutron/plugins/bigswitch/plugin.py:609:
+neutron/plugins/bigswitch/plugin.py:610:        :raises: exceptions.NetworkInUse
+neutron/plugins/bigswitch/plugin.py:611:        :raises: exceptions.NetworkNotFound
+neutron/plugins/bigswitch/plugin.py:612:        :raises: RemoteRestError
+neutron/plugins/bigswitch/plugin.py:613:        """
+neutron/plugins/bigswitch/plugin.py:614:        LOG.debug(_("NeutronRestProxyV2: delete_network() called"))
+neutron/plugins/bigswitch/plugin.py:615:
+neutron/plugins/bigswitch/plugin.py:616:        # Validate args
+neutron/plugins/bigswitch/plugin.py:617:        orig_net = super(NeutronRestProxyV2, self).get_network(context, net_id)
+neutron/plugins/bigswitch/plugin.py:618:
+neutron/plugins/bigswitch/plugin.py:619:        filter = {'network_id': [net_id]}
+neutron/plugins/bigswitch/plugin.py:620:        ports = self.get_ports(context, filters=filter)
+neutron/plugins/bigswitch/plugin.py:621:
+neutron/plugins/bigswitch/plugin.py:622:        # check if there are any tenant owned ports in-use
+neutron/plugins/bigswitch/plugin.py:623:        auto_delete_port_owners = db_base_plugin_v2.AUTO_DELETE_PORT_OWNERS
+neutron/plugins/bigswitch/plugin.py:624:        only_auto_del = all(p['device_owner'] in auto_delete_port_owners
+neutron/plugins/bigswitch/plugin.py:625:                            for p in ports)
+neutron/plugins/bigswitch/plugin.py:626:
+neutron/plugins/bigswitch/plugin.py:627:        if not only_auto_del:
+neutron/plugins/bigswitch/plugin.py:628:            raise exceptions.NetworkInUse(net_id=net_id)
+neutron/plugins/bigswitch/plugin.py:629:        with context.session.begin(subtransactions=True):
+neutron/plugins/bigswitch/plugin.py:630:            ret_val = super(NeutronRestProxyV2, self).delete_network(context,
+neutron/plugins/bigswitch/plugin.py:631:                                                                     net_id)
+neutron/plugins/bigswitch/plugin.py:632:            self._send_delete_network(orig_net, context)
+neutron/plugins/bigswitch/plugin.py:633:            return ret_val
+
+neutron/plugins/bigswitch/plugin.py:791:    # NOTE(kevinbenton): workaround for eventlet/mysql deadlock
+neutron/plugins/bigswitch/plugin.py:792:    @utils.synchronized('bsn-port-barrier')
+neutron/plugins/bigswitch/plugin.py:793:    def delete_port(self, context, port_id, l3_port_check=True):
+neutron/plugins/bigswitch/plugin.py:794:        """Delete a port.
+neutron/plugins/bigswitch/plugin.py:795:        :param context: neutron api request context
+neutron/plugins/bigswitch/plugin.py:796:        :param id: UUID representing the port to delete.
+neutron/plugins/bigswitch/plugin.py:797:
+neutron/plugins/bigswitch/plugin.py:798:        :raises: exceptions.PortInUse
+neutron/plugins/bigswitch/plugin.py:799:        :raises: exceptions.PortNotFound
+neutron/plugins/bigswitch/plugin.py:800:        :raises: exceptions.NetworkNotFound
+neutron/plugins/bigswitch/plugin.py:801:        :raises: RemoteRestError
+neutron/plugins/bigswitch/plugin.py:802:        """
+neutron/plugins/bigswitch/plugin.py:803:        LOG.debug(_("NeutronRestProxyV2: delete_port() called"))
+neutron/plugins/bigswitch/plugin.py:804:
+neutron/plugins/bigswitch/plugin.py:805:        # if needed, check to see if this is a port owned by
+neutron/plugins/bigswitch/plugin.py:806:        # and l3-router.  If so, we should prevent deletion.
+neutron/plugins/bigswitch/plugin.py:807:        if l3_port_check:
+neutron/plugins/bigswitch/plugin.py:808:            self.prevent_l3_port_deletion(context, port_id)
+neutron/plugins/bigswitch/plugin.py:809:        with context.session.begin(subtransactions=True):
+neutron/plugins/bigswitch/plugin.py:810:            self.disassociate_floatingips(context, port_id)
+neutron/plugins/bigswitch/plugin.py:811:            self._delete_port_security_group_bindings(context, port_id)
+neutron/plugins/bigswitch/plugin.py:812:            port = super(NeutronRestProxyV2, self).get_port(context, port_id)
+neutron/plugins/bigswitch/plugin.py:813:            # Tenant ID must come from network in case the network is shared
+neutron/plugins/bigswitch/plugin.py:814:            tenid = self._get_port_net_tenantid(context, port)
+neutron/plugins/bigswitch/plugin.py:815:            self._delete_port(context, port_id)
+neutron/plugins/bigswitch/plugin.py:816:            self.servers.rest_delete_port(tenid, port['network_id'], port_id)
+
+_______________________________________________________________________________
+APPENDIX comments
+
+________________________________ 2/neutron/plugins/bigswitch/plugin.py:
+
+Sumit Naiksatam Mar 22
+so if rest_delete_port fails, the transaction is rolled back?
+
+Kevin Benton		Mar 22
+Yep. The transaction starts on 801 and by calling
+_delete_port directly, it doesn't start another transaction. If
+rest_delete_port fails it will rollback to the db at 801.
+
+Salvatore Orlando		Mar 25
+If the backend operation fails, it is ok to undo the
+transaction in most cases. I would argue indeed that if the backend returns
+"resurce not found", you might just log the error and not raise or rollback.
+Also, in case of errors causing a rollback it might be worth setting the status
+to "ERROR" afterwards.
+
+Kevin Benton		Mar 25
+rest_delete_port already ignores resource not found. You
+can see the logic for that in servermanager.py in the rest_action method. If
+the verb is 'DELETE', 404's are ignored.  I'm not sure about changing the
+status of the port to ERROR. Even though the transaction did fail, it doesn't
+necessarily mean there is anything wrong with the state of the port. The
+majority of the cases that could cause a failure are due to the controller
+being unavailable at the time (e.g. connectivity issue or in the middle of an
+upgrade). Does it make sense to put the port in the error state in this case
+when it's actually functioning normally from the perspective of the VM and the
+backend controller?
+
+Salvatore Orlando		Mar 27
+even if it's functioning normally the configuration
+running on the backend is not in sync with the desired configuration. ERROR is
+the best thing that approximates what the author of the patch wants to achieve
+here.  Btw, is the rest operation synchronous in your model?
+
+Kevin Benton		Mar 28
+This is currently a synchronous operation. Any error
+received from the backend controller means the change attempted was not
+committed. This will raise an exception in the rest call which will roll back
+the DB transaction here. The backend in this case will still be in sync with
+the configuration at that point.
+
+_________________________________ 1/neutron/plugins/bigswitch/plugin.py:
+
+Kanzhe Jiang		Mar 22
+The rest call to the backend should be made after the DB transaction.
+
+Kevin Benton		Mar 22
+Done
+

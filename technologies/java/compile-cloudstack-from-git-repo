@@ -1,0 +1,21 @@
+
+Compiling cloudstack from git repo
+
+1. set up nexus proxy server.
+2. configure maven to use nexus in ~/.m2/settings.xml.
+3. git branch GA-4.5.1 origin/GA-4.5.1
+4. mvn install -U -P systemvm,developer. Some 3rd party jar and pom files are
+   missing from the nexus repositories. They shall be uploaded to nexus. After
+   several trial-and-error cycles, these files have to be uploaded to nexus:
+
+   1. http://juniper.github.io/contrail-maven/snapshots/net/juniper/contrail/juniper-contrail-api/1.0-SNAPSHOT/juniper-contrail-api-1.0-20131001.003401-3.pom
+   2. http://juniper.github.io/contrail-maven/snapshots/net/juniper/contrail/juniper-contrail-api/1.0-SNAPSHOT/juniper-contrail-api-1.0-20131001.003401-3.jar
+   3. http://cs-maven.midokura.com/releases/org/midonet/midonet-client/1.1.0/midonet-client-1.1.0.pom
+   4. http://cs-maven.midokura.com/releases/org/midonet/midonet-client/1.1.0/midonet-client-1.1.0.jar
+   5. http://cs-maven.midokura.com/releases/org/midonet/midonet-parent/1.1.0/midonet-parent-1.1.0.pom
+   
+   In particular, the first 2 are snapshot versions, shall be uploaded via
+   mvn deploy (see document 'uploading-snapshot-jars-to-nexus'). The latter 3
+   can be uploaded via the nexus web interface. Unexpectedly, the 5th item is
+   merely a pom without jar. And, the web interface does allow such cases!
+

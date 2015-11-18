@@ -1,0 +1,23 @@
+Code excerpt from lib/console.c:
+98 ssize_t
+99 cons_write(struct Fd *fd, const void *vbuf, size_t n, off_t offset)
+100 {
+101     int tot, m;
+102     char buf[128];
+103 
+104     USED(offset);
+105 
+106     // mistake: have to nul-terminate arg to sys_cputs, 
+107     // so we have to copy vbuf into buf in chunks and nul-terminate.
+108     for (tot = 0; tot < n; tot += m) {
+109             m = n - tot;
+110             if (m > sizeof(buf) - 1)
+111                     m = sizeof(buf) - 1;
+112             memcpy(buf, (char*)vbuf + tot, m);
+113             sys_cputs(buf, m);
+114     }
+115     return tot;
+116 }
+
+Note:
+1. This is a good demo of elegant copy-in-terms-of-chunks.

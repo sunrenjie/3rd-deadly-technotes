@@ -1,0 +1,315 @@
+commit 97a529ad8eaee80e196eb362c4e45901a96ae23c
+Author: Yves-Gwenael Bourhis <yves-gwenael.bourhis@cloudwatt.com>
+Date:   Mon Oct 21 16:14:06 2013 +0200
+
+    Make dnsmasq aware of all names
+    
+    Each dnsmasq instance on a network is not aware of other dnsmasq's leases.
+    
+    When dnsmasq is launched with --no-hosts and is not provided an --addn-hosts
+    file, it can resolve only the hosts to which it gives a dhcp lease and no more.
+    i.e.:
+    If dnsmasq service n°1 gives a lease to instance n°1, and dnsmasq service n°2
+    gives a lease to instance n°2, both VM instances and dnsmasq services being on
+    the same network: instance n°1 can not resolve instance n°2, because instance
+    n°1 queries dnsmasq n°1, and since it did not give the lease to instance n°2,
+    it can not resolve it (it is not aware of its existence). Same issue if
+    instance n°2 tries to resolve instance n°1.
+    
+    The solution is to provide dnsmasq with an --addn-hosts file of all hosts on
+    the network. With an --addn-hosts file, each dnsmasq instance is aware of all
+    the hosts on the network even if they do not give the lease for a host,
+    therefore each dnsmasq instance can resolve any host on their network even if
+    they did not provide the lease for it themselves.
+    
+    Change-Id: Ic6d4f7854d250889dded5491e4693fcdce32ed00
+    Fixes: bug #1242712
+
+Notes:
+1. This bug is due to inadequate wrapping of the underlying software; it
+   surfaces when multiple instances of dnsmasq run in the same network.
+2. [context] The dnsmasq policy is that it only resolve interfaces that it
+   know, i.e., only those that either obtain lease from it or exist in files
+   specified in --addn-hosts option (those that exist in file /etc/hosts of
+   the host node running dnsmasq are not taken into account because --no-hosts
+   is always set in openstack deployment). This is good from security point of
+   view. But when more than one dnsmasq instances run in the same network, vm
+   interfaces obtaining lease from different dnsmasq instances cannot access
+   each other.
+3. [summary] Now dnsmasq instances are spawned with --addn-hosts option set
+   to a file (in the style of /etc/hosts) that contains all interfaces (hosts)
+   maintained by the Dnsmasq class. Hence all interfaces managed by Dnsmasq
+   class, no matter from which instance of dnsmasq the leases are obtained,
+   can address each other.
+---
+ neutron/agent/linux/dhcp.py           | 104 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------
+ + Added a method Dnsmasq._output_addn_hosts_file() whose output file is for
+   use with the --addn-hosts option of dnsmasq.
+ + Now that Dnsmasq._output_addn_hosts_file() and Dnsmasq._output_hosts_file()
+   both iterate self.network.ports now, the iteration is moved out of
+   Dnsmasq._output_hosts_file() to a dedicated function Dnsmasq._iter_hosts().
+ + The option --addn-hosts=_output_addn_hosts_file() is added while spawning
+   dnsmasq process.
+ neutron/tests/unit/test_linux_dhcp.py |  67 ++++++++++++++++++++++++++++++++++++-------------------------------
+ 2 files changed, 112 insertions(+), 59 deletions(-)
+
+diff --git a/neutron/agent/linux/dhcp.py b/neutron/agent/linux/dhcp.py
+index 118d3ad..e650c00 100644
+--- a/neutron/agent/linux/dhcp.py
++++ b/neutron/agent/linux/dhcp.py
+@@ -324,6 +324,7 @@ class Dnsmasq(DhcpLocalProcess):
+             '--pid-file=%s' % self.get_conf_file_name(
+                 'pid', ensure_conf_dir=True),
+             '--dhcp-hostsfile=%s' % self._output_hosts_file(),
++            '--addn-hosts=%s' % self._output_addn_hosts_file(),
+             '--dhcp-optsfile=%s' % self._output_opts_file(),
+             '--leasefile-ro',
+         ]
+@@ -390,6 +391,7 @@ class Dnsmasq(DhcpLocalProcess):
+ 
+         self._release_unused_leases()
+         self._output_hosts_file()
++        self._output_addn_hosts_file()
+         self._output_opts_file()
+         if self.active:
+             cmd = ['kill', '-HUP', self.pid]
+@@ -399,40 +401,67 @@ class Dnsmasq(DhcpLocalProcess):
+         LOG.debug(_('Reloading allocations for network: %s'), self.network.id)
+         self.device_manager.update(self.network)
+ 
++    def _iter_hosts(self):
++        """Iterate over hosts.
++
++        For each host on the network we yield a tuple containing:
++        (
++            port,  # a DictModel instance representing the port.
++            alloc,  # a DictModel instance of the allocated ip and subnet.
++            host_name,  # Host name.
++            name,  # Host name and domain name in the format 'hostname.domain'.
++        )
++        """
++        for port in self.network.ports:
++            for alloc in port.fixed_ips:
++                hostname = 'host-%s' % alloc.ip_address.replace(
++                    '.', '-').replace(':', '-')
++                fqdn = '%s.%s' % (hostname, self.conf.dhcp_domain)
++                yield (port, alloc, hostname, fqdn)
++
+     def _output_hosts_file(self):
+-        """Writes a dnsmasq compatible hosts file."""
+-        r = re.compile('[:.]')
++        """Writes a dnsmasq compatible dhcp hosts file.
++
++        The generated file is sent to the --dhcp-hostsfile option of dnsmasq,
++        and lists the hosts on the network which should receive a dhcp lease.
++        Each line in this file is in the form::
++
++            'mac_address,FQDN,ip_address'
++
++        IMPORTANT NOTE: a dnsmasq instance does not resolve hosts defined in
++        this file if it did not give a lease to a host listed in it (e.g.:
++        multiple dnsmasq instances on the same network if this network is on
++        multiple network nodes). This file is only defining hosts which
++        should receive a dhcp lease, the hosts resolution in itself is
++        defined by the `_output_addn_hosts_file` method.
++        """
+         buf = six.StringIO()
+         filename = self.get_conf_file_name('host')
+ 
+         LOG.debug(_('Building host file: %s'), filename)
++        for (port, alloc, hostname, name) in self._iter_hosts():
++            set_tag = ''
++            # (dzyu) Check if it is legal ipv6 address, if so, need wrap
++            # it with '[]' to let dnsmasq to distinguish MAC address from
++            # IPv6 address.
++            ip_address = alloc.ip_address
++            if netaddr.valid_ipv6(ip_address):
++                ip_address = '[%s]' % ip_address
+ 
+-        for port in self.network.ports:
+-            for alloc in port.fixed_ips:
+-                name = 'host-%s.%s' % (r.sub('-', alloc.ip_address),
+-                                       self.conf.dhcp_domain)
+-                set_tag = ''
+-                # (dzyu) Check if it is legal ipv6 address, if so, need wrap
+-                # it with '[]' to let dnsmasq to distinguish MAC address from
+-                # IPv6 address.
+-                ip_address = alloc.ip_address
+-                if netaddr.valid_ipv6(ip_address):
+-                    ip_address = '[%s]' % ip_address
+-
+-                LOG.debug(_('Adding %(mac)s : %(name)s : %(ip)s'),
+-                          {"mac": port.mac_address, "name": name,
+-                           "ip": ip_address})
+-
+-                if getattr(port, 'extra_dhcp_opts', False):
+-                    if self.version >= self.MINIMUM_VERSION:
+-                        set_tag = 'set:'
+-
+-                    buf.write('%s,%s,%s,%s%s\n' %
+-                              (port.mac_address, name, ip_address,
+-                               set_tag, port.id))
+-                else:
+-                    buf.write('%s,%s,%s\n' %
+-                              (port.mac_address, name, ip_address))
++            LOG.debug(_('Adding %(mac)s : %(name)s : %(ip)s'),
++                      {"mac": port.mac_address, "name": name,
++                       "ip": ip_address})
++
++            if getattr(port, 'extra_dhcp_opts', False):
++                if self.version >= self.MINIMUM_VERSION:
++                    set_tag = 'set:'
++
++                buf.write('%s,%s,%s,%s%s\n' %
++                          (port.mac_address, name, ip_address,
++                           set_tag, port.id))
++            else:
++                buf.write('%s,%s,%s\n' %
++                          (port.mac_address, name, ip_address))
+ 
+         utils.replace_file(filename, buf.getvalue())
+         LOG.debug(_('Done building host file %s'), filename)
+@@ -459,6 +488,25 @@ class Dnsmasq(DhcpLocalProcess):
+         for ip, mac in old_leases - new_leases:
+             self._release_lease(mac, ip)
+ 
++    def _output_addn_hosts_file(self):
++        """Writes a dnsmasq compatible additional hosts file.
++
++        The generated file is sent to the --addn-hosts option of dnsmasq,
++        and lists the hosts on the network which should be resolved even if
++        the dnsmaq instance did not give a lease to the host (see the
++        `_output_hosts_file` method).
++        Each line in this file is in the same form as a standard /etc/hosts
++        file.
++        """
++        buf = six.StringIO()
++        for (port, alloc, hostname, fqdn) in self._iter_hosts():
++            # It is compulsory to write the `fqdn` before the `hostname` in
++            # order to obtain it in PTR responses.
++            buf.write('%s\t%s %s\n' % (alloc.ip_address, fqdn, hostname))
++        addn_hosts = self.get_conf_file_name('addn_hosts')
++        utils.replace_file(addn_hosts, buf.getvalue())
++        return addn_hosts
++
+     def _output_opts_file(self):
+         """Write a dnsmasq compatible options file."""
+ 
+diff --git a/neutron/tests/unit/test_linux_dhcp.py b/neutron/tests/unit/test_linux_dhcp.py
+index 72d633c..7764bce 100644
+--- a/neutron/tests/unit/test_linux_dhcp.py
++++ b/neutron/tests/unit/test_linux_dhcp.py
+@@ -672,6 +672,7 @@ class TestDnsmasq(TestBase):
+             '--except-interface=lo',
+             '--pid-file=/dhcp/%s/pid' % network.id,
+             '--dhcp-hostsfile=/dhcp/%s/host' % network.id,
++            '--addn-hosts=/dhcp/%s/addn_hosts' % network.id,
+             '--dhcp-optsfile=/dhcp/%s/opts' % network.id,
+             '--leasefile-ro']
+ 
+@@ -962,7 +963,8 @@ tag:44444444-4444-4444-4444-444444444444,option:bootfile-name,pxelinux3.0"""
+ 
+         self.safe.assert_called_once_with('/foo/opts', expected)
+ 
+-    def test_reload_allocations(self):
++    @property
++    def _test_reload_allocation_data(self):
+         exp_host_name = '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc/host'
+         exp_host_data = ('00:00:80:aa:bb:cc,host-192-168-0-2.openstacklocal,'
+                          '192.168.0.2\n'
+@@ -974,8 +976,23 @@ tag:44444444-4444-4444-4444-444444444444,option:bootfile-name,pxelinux3.0"""
+                          'openstacklocal,[fdca:3ba5:a17a:4ba3::3]\n'
+                          '00:00:0f:rr:rr:rr,host-192-168-0-1.openstacklocal,'
+                          '192.168.0.1\n').lstrip()
++        exp_addn_name = '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc/addn_hosts'
++        exp_addn_data = (
++            '192.168.0.2\t'
++            'host-192-168-0-2.openstacklocal host-192-168-0-2\n'
++            'fdca:3ba5:a17a:4ba3::2\t'
++            'host-fdca-3ba5-a17a-4ba3--2.openstacklocal '
++            'host-fdca-3ba5-a17a-4ba3--2\n'
++            '192.168.0.3\thost-192-168-0-3.openstacklocal '
++            'host-192-168-0-3\n'
++            'fdca:3ba5:a17a:4ba3::3\t'
++            'host-fdca-3ba5-a17a-4ba3--3.openstacklocal '
++            'host-fdca-3ba5-a17a-4ba3--3\n'
++            '192.168.0.1\t'
++            'host-192-168-0-1.openstacklocal '
++            'host-192-168-0-1\n'
++        ).lstrip()
+         exp_opt_name = '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc/opts'
+-        exp_opt_data = "tag:tag0,option:router,192.168.0.1"
+         fake_v6 = 'gdca:3ba5:a17a:4ba3::1'
+         fake_v6_cidr = 'gdca:3ba5:a17a:4ba3::/64'
+         exp_opt_data = """
+@@ -988,6 +1005,14 @@ tag:tag1,option:classless-static-route,%s,%s
+ tag:tag1,249,%s,%s""".lstrip() % (fake_v6,
+                                   fake_v6_cidr, fake_v6,
+                                   fake_v6_cidr, fake_v6)
++        return (exp_host_name, exp_host_data,
++                exp_addn_name, exp_addn_data,
++                exp_opt_name, exp_opt_data,)
++
++    def test_reload_allocations(self):
++        (exp_host_name, exp_host_data,
++         exp_addn_name, exp_addn_data,
++         exp_opt_name, exp_opt_data,) = self._test_reload_allocation_data
+ 
+         exp_args = ['kill', '-HUP', 5]
+ 
+@@ -1008,36 +1033,14 @@ tag:tag1,249,%s,%s""".lstrip() % (fake_v6,
+                         self.assertTrue(ip_map.called)
+ 
+         self.safe.assert_has_calls([mock.call(exp_host_name, exp_host_data),
++                                    mock.call(exp_addn_name, exp_addn_data),
+                                     mock.call(exp_opt_name, exp_opt_data)])
+         self.execute.assert_called_once_with(exp_args, 'sudo')
+ 
+     def test_reload_allocations_stale_pid(self):
+-        exp_host_name = '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc/host'
+-        exp_host_data = ('00:00:80:aa:bb:cc,host-192-168-0-2.openstacklocal,'
+-                         '192.168.0.2\n'
+-                         '00:00:f3:aa:bb:cc,host-fdca-3ba5-a17a-4ba3--2.'
+-                         'openstacklocal,[fdca:3ba5:a17a:4ba3::2]\n'
+-                         '00:00:0f:aa:bb:cc,host-192-168-0-3.openstacklocal,'
+-                         '192.168.0.3\n'
+-                         '00:00:0f:aa:bb:cc,host-fdca-3ba5-a17a-4ba3--3.'
+-                         'openstacklocal,[fdca:3ba5:a17a:4ba3::3]\n'
+-                         '00:00:0f:rr:rr:rr,host-192-168-0-1.openstacklocal,'
+-                         '192.168.0.1\n').lstrip()
+-        exp_host_data.replace('\n', '')
+-        exp_opt_name = '/dhcp/cccccccc-cccc-cccc-cccc-cccccccccccc/opts'
+-        exp_opt_data = "tag:tag0,option:router,192.168.0.1"
+-        fake_v6 = 'gdca:3ba5:a17a:4ba3::1'
+-        fake_v6_cidr = 'gdca:3ba5:a17a:4ba3::/64'
+-        exp_opt_data = """
+-tag:tag0,option:dns-server,8.8.8.8
+-tag:tag0,option:classless-static-route,20.0.0.1/24,20.0.0.1
+-tag:tag0,249,20.0.0.1/24,20.0.0.1
+-tag:tag0,option:router,192.168.0.1
+-tag:tag1,option:dns-server,%s
+-tag:tag1,option:classless-static-route,%s,%s
+-tag:tag1,249,%s,%s""".lstrip() % (fake_v6,
+-                                  fake_v6_cidr, fake_v6,
+-                                  fake_v6_cidr, fake_v6)
++        (exp_host_name, exp_host_data,
++         exp_addn_name, exp_addn_data,
++         exp_opt_name, exp_opt_data,) = self._test_reload_allocation_data
+ 
+         with mock.patch('__builtin__.open') as mock_open:
+             mock_open.return_value.__enter__ = lambda s: s
+@@ -1057,9 +1060,11 @@ tag:tag1,249,%s,%s""".lstrip() % (fake_v6,
+                         dm.reload_allocations()
+                         self.assertTrue(ipmap.called)
+ 
+-            self.safe.assert_has_calls([mock.call(exp_host_name,
+-                                                  exp_host_data),
+-                                        mock.call(exp_opt_name, exp_opt_data)])
++            self.safe.assert_has_calls([
++                mock.call(exp_host_name, exp_host_data),
++                mock.call(exp_addn_name, exp_addn_data),
++                mock.call(exp_opt_name, exp_opt_data),
++            ])
+             mock_open.assert_called_once_with('/proc/5/cmdline', 'r')
+ 
+     def test_release_unused_leases(self):

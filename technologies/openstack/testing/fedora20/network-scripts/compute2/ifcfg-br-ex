@@ -1,0 +1,7 @@
+DEVICE=br-ex
+DEVICETYPE=ovs
+TYPE=OVSBridge
+OVSBOOTPROTO=dhcp
+OVSDHCPINTERFACES=ens3
+ONBOOT=yes
+OVS_EXTRA="set Bridge br-ex other-config:hwaddr=52:54:00:73:35:53"

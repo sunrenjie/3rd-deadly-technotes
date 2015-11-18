@@ -1,0 +1,118 @@
+
+Mar 2, 2012
+
+Here list ELF-related data structures.
+
+#define EI_NIDENT 16
+
+typedef struct {
+        unsigned char   e_ident[EI_NIDENT];
+        Elf32_Half      e_type;
+        Elf32_Half      e_machine;
+        Elf32_Word      e_version;
+        Elf32_Addr      e_entry;
+        Elf32_Off       e_phoff;
+        Elf32_Off       e_shoff;
+        Elf32_Word      e_flags;
+        Elf32_Half      e_ehsize;
+        Elf32_Half      e_phentsize;
+        Elf32_Half      e_phnum;
+        Elf32_Half      e_shentsize;
+        Elf32_Half      e_shnum;
+        Elf32_Half      e_shtrndx;
+} Elf32_Ehdr;
+
+e_ident
+The initial bytes mark the file as an object file and provide machine-independent data with which to decode and interpret the file's contents. Complete descriptions appear below in ``ELF Identification''.
+e_type
+This member identifies the object file type.
+Name	Value	Meaning
+ET_NONE	0	No file type
+ET_REL	1	Relocatable file
+ET_EXEC	2	Executable file
+ET_DYN	3	Shared object file
+ET_CORE	4	Core file
+e_machine
+This member's value specifies the required architecture for an individual file.
+e_version
+This member identifies the object file version.
+e_entry
+This member gives the virtual address to which the system first transfers control, thus starting the process. If the file has no associated entry point, this member holds zero.
+e_phoff
+This member holds the program header table's file offset in bytes. If the file has no program header table, this member holds zero.
+e_shoff
+This member holds the section header table's file offset in bytes. If the file has no section header table, this member holds zero.
+e_flags
+This member holds processor-specific flags associated with the file. Flag names take the form EF_machine_flag.
+e_ehsize
+This member holds the ELF header's size in bytes.
+e_phentsize
+This member holds the size in bytes of one entry in the file's program header table; all entries are the same size.
+e_phnum
+This member holds the number of entries in the program header table. Thus the product of e_phentsize and e_phnum gives the table's size in bytes. If a file has no program header table, e_phnum holds the value zero.
+e_shentsize
+This member holds a section header's size in bytes. A section header is one entry in the section header table; all entries are the same size.
+e_shnum
+This member holds the number of entries in the section header table. Thus the product of e_shentsize and e_shnum gives the section header table's size in bytes. If a file has no section header table, e_shnum holds the value zero.
+If the number of sections is greater than or equal to SHN_LORESERVE (0xff00), this member has the value zero and the actual number of section header table entries is contained in the sh_size field of the section header at index 0. (Otherwise, the sh_size member of the initial entry contains 0.)
+e_shstrndx
+This member holds the section header table index of the entry associated with the section name string table. If the file has no section name string table, this member holds the value SHN_UNDEF. See ``Sections'' and ``String Table'' below for more information.
+
+Figure 4-4: e_ident[] Identification Indexes
+Name	Value	Purpose
+EI_MAG0	0	File identification
+EI_MAG1	1	File identification
+EI_MAG2	2	File identification
+EI_MAG3	3	File identification
+EI_CLASS	4	File class
+EI_DATA	5	Data encoding
+EI_VERSION	6	File version
+EI_OSABI	7	Operating system/ABI identification
+EI_ABIVERSION	8	ABI version
+EI_PAD	9	Start of padding bytes
+EI_NIDENT	16	Size of e_ident[]
+
+struct Proghdr {
+        uint32_t p_type;        // segment type
+        uint32_t p_offset;      // offset in bytes of the segment in the file
+        uint32_t p_va;          // virtual address this segment to be loaded
+        uint32_t p_pa;          // physical address (if applicable)
+        uint32_t p_filesz;      // # bytes of the segment in file
+        uint32_t p_memsz;       // # bytes of the segment in memory
+        uint32_t p_flags;       // flags
+        uint32_t p_align;       // value to which the segments are aligned in memory and in file
+};
+
+struct Secthdr {
+        uint32_t sh_name;       // section name's index into the section header string table
+        uint32_t sh_type;       // section type
+        uint32_t sh_flags;      // attributes (write, alloc, etc.)
+        uint32_t sh_addr;       // the address of the section's first byte in memory (if applicable)
+        uint32_t sh_offset;     // offset of the section's first byte from the beginning of the file
+        uint32_t sh_size;       // section size
+        uint32_t sh_link;       // these two members are
+        uint32_t sh_info;       // section type-specific.
+        uint32_t sh_addralign;  // address alignment constraints
+        uint32_t sh_entsize;    // size in bytes for fixed-size entries such as in symbol table; otherwise 0
+};
+
+typedef struct { // Figure 4-16: Symbol Table Entry // sizeof = 4 * 4 = 0x10 bytes
+	Elf32_Word	st_name;  // index into the object file's symbol string table
+	Elf32_Addr	st_value; // In executable and shared object files, st_value holds a virtual address.
+	Elf32_Word	st_size;
+	unsigned char	st_info;
+	unsigned char	st_other;
+	Elf32_Half	st_shndx;
+} Elf32_Sym;
+
+/*
+Figure 4-2: 32-Bit Data Types
+Name		Size	Align.	Purpose
+Elf32_Addr	4	4	Unsigned program address
+Elf32_Off	4	4	Unsigned file offset
+Elf32_Half	2	2	Unsigned medium integer
+Elf32_Word	4	4	Unsigned integer
+Elf32_Sword	4	4	Signed integer
+unsigned char	1	1	Unsigned small integer
+*/
+

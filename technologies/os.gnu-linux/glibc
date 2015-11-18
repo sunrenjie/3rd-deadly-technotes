@@ -1,0 +1,22 @@
+
+eglibc (as shipped in debian) related notes started at 20130527
+
+1) While I was trying to get myself familiar with the pthread library in eglibc,
+I searched again and again, yet failed to locate the definition for a pthread
+function, say pthread_mutex_lock(). After some messing around and grepping, I
+found this line:
+nptl/pthread_mutex_lock.c:473:strong_alias (__pthread_mutex_lock, pthread_mutex_lock)
+
+It turned out that it is the convention of eglibc to define the library functions
+as having a prefix of two additional underscore characters. Then the library
+facility strong_alias (defined in include/libc-symbols.h) perform such
+symbol conversion.
+
+UPDATE-20130528:
+When it comes to pthread_create, the conversion is different:
+pthread_create.c:443:__pthread_create_2_1 (newthread, attr, start_routine, arg)
+pthread_create.c:563:versioned_symbol (libpthread, __pthread_create_2_1, pthread_create, GLIBC_2_1);
+
+Some extra effort is made to maintain binary compatibility.
+
+

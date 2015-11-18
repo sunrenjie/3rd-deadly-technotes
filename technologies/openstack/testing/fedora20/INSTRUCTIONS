@@ -1,0 +1,58 @@
+
+Instructions for installing openstack on fedora 20 vm in kvm+qemu
+
+_______________________________________
+To create a seed (preliminary) vm image
+
+# create hard disk
+qemu-img create -f qcow2 -o preallocation=metadata -o cluster_size=2M f20.qcow2 20G
+
+# install from dvd
+sudo virt-install --connect qemu:///system -n f18 -r 4096 --vcpus=4 \
+  --accelerate -v --os-variant=fedora20 -c Fedora-18-x86_64-DVD.iso \
+  -w bridge:br0,model=e1000 --vnc --disk \
+  path=f18.qcow2,cache=none,format=qcow2,bus=virtio
+
+virsh edit f20 and add
+    <filesystem type='mount' accessmode='mapped'>
+      <source dir='/home/r'/>
+      <target dir='host0'/>
+    </filesystem>
+
+##################################
+# scp my id_rsa.pub to vm as ~/.ssh/authorized_keys with proper permission.
+
+# make backup
+qemu-img convert -c -f qcow2 -O qcow2 -o cluster_size=2M f20.qcow2 \
+  f20-clone.qcow2
+
+NOTE:
+0. The package vim-minimal shall be updated first. This allows vim (and hence
+   rabbitmq-server) to be installed without conflict complaint.
+1. A second stage seed vm image for devstack can be made by pre-installing
+   dependent packages as revealed by log file generated a pilot installation
+   attempt (for example, see packages-preinstalled-for-devstack). For rdo
+   packstack, the only one difference is that it uses different database;
+   therefore, the packages mariadb mariadb-libs mariadb-server shall be
+   removed to avoid conflicts.
+2. If you wish to change hostname, do that at early as possible, at least
+   before installation of openstack.
+3. Always note the user/tenant you use for different tasks. For example, on
+   RDO packstack installation, demo user shall be used to create vm as network
+   setting is inadequate for admin user. We spent 4 or 5 days to figure this
+   out.
+
+________________________________________
+To create a two-node openstack configuration
+
+1. Have available two nics (say, eth0, eth1) in the Linux host.
+2. Create two bridges br0, br1. Add eth0 and eth1 to br0 and br1 respectively.
+   If further nodes are to be added, create a network that connects all the
+   nodes. Now network to which eth0 is connected will be the external one,
+   while the network to which eth1 is connected will be the internal one.
+3. Install openstack modules on these nodes. For RDO packstack, there is an
+   official page describing the procedure. For devstack, local.conf for
+   controller and compute node is created in my devstack git repo.
+4. If you cannot ping the VM via the floating IP, execute tcpdump on the host
+   of the VM once and the problem disappears; do not know why.
+

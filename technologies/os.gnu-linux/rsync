@@ -1,0 +1,7 @@
+We got ourself familiar with rsync today, used it to sync the lite dir.
+
+The command is:
+rsync -av --delete /giga/current/lite/ /run/media/r/POOL/t/lite
+
+Certainly, we shall diff the two before doing this.
+

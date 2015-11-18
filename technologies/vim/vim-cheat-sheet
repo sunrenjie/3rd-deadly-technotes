@@ -1,0 +1,6 @@
+Vim cheat sheet
+
+Q: How to restructure/force text to 79 columns
+A: Set textwidth to 80; Then use gq command:
+   + gqG: apply from current position to EOF
+   + gq}: apply from current position to the end of current paragrah.

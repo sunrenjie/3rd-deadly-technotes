@@ -1,0 +1,1174 @@
+commit f83b2ef4fc042d8559b1f75dbe949460f2843c7e
+Author: Abhishek Raut <abhraut@cisco.com>
+Date:   Wed Mar 5 19:02:40 2014 -0800
+
+    Fix segment allocation tables in Cisco N1kv plugin
+    
+    The segment allocation table is emptied on deleting any network profile.
+    This change allows the use of segment range from the network profile table.
+    By using the network profile UUID as a foreign key in the segment allocations table,
+    tables are cleaned up only for the segments associated with
+    the deleted network profile via CASCADE, leaving no inconsistencies.
+    
+    Change-Id: I507041fac3768a7b688ddcf28c4d97c618bfe3f9
+    Closes-Bug: #1288407
+
+Notes:
+1. This commit changes resource management policy. Vlan IDs are now managed in
+   terms of network profile instead of ranges. This change simplifies the
+   management process and provides additional flexibility.
+2. [changes] First of all, added column 'network_profile_id' to db table
+   N1kvVlanAllocation and N1kvVxlanAllocation as foreign key to
+   cisco_network_profiles.id, with ondelete="CASCADE" for automatic clean up
+   of the allocation tables. Second, all vlan IDs are allocated at sync(); any
+   ID not allocated is sure to be out of the pool.
+
+---
+ neutron/db/migration/alembic_migrations/versions/5ac1c354a051_n1kv_segment_alloc.py |  83 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ + Introduced db migration version 5ac1c354a051 to reflect the modifications to
+   the cisco n1kv plugin code.
+ neutron/db/migration/alembic_migrations/versions/HEAD                               |   2 +-
+ + Set db migration HEAD to the version 5ac1c354a051 introduced in this change.
+ neutron/plugins/cisco/common/cisco_exceptions.py                                    |  13 ++++++++++++-
+ + Added two exceptions VxlanIDNotFound and VxlanIDOutsidePool.
+ neutron/plugins/cisco/db/n1kv_db_v2.py                                              | 200 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------------------------------------------------------------------------------------------------
+ + In method sync_vlan_allocations(), we now work in terms of network profile
+   instead of ID ranges. All vlan IDs within the physical network of the
+   network profile will be allocated. Same for vxlan is performed, with the
+   additional respect for MAX_VXLAN_RANGE limit.
+ + Removed method _get_sorted_vlan_ids() as it is no more called by
+   sync_vlan_allocations(). Same for vxlan is performed.
+ + Removed method delete_vlan_allocations(), as it is no more needed. Same for
+   vxlan is performed.
+ + In method get_vxlan_allocation(), reraise exc.NoResultFound as
+   c_exc.VxlanIDNotFound. This is already the case for get_vlan_allocation().
+ + In method reserve_specific_vlan(), when dbsession.query() raises exception
+   exc.NoResultFound, re-raise as c_exc.VlanIDOutsidePool (which is defined in
+   this change) instead of trying to allocate the vlan id in question, since
+   all vlan IDs are known to be allocated. Same for vxlan is performed.
+ + In method release_vlan(), now that all vlan IDs are known to be allocated,
+   we now rely on dbsession.query() exception to catch the vlan-out-of-pool
+   error, insteading of perform explicit range check. The last parameter
+   vxlan_id_ranges is removed. Same for vxlan is performed.
+ + In method NetworkProfile_db_mixin.create_network_profile(), call
+   sync_vlan_allocations() for segment type NETWORK_TYPE_VLAN and
+   sync_vxlan_allocations for segment type NETWORK_TYPE_OVERLAY.
+ neutron/plugins/cisco/db/n1kv_models_v2.py                                          |   8 ++++++++
+ + Added column 'network_profile_id' to database-table-mapping classes
+   N1kvVlanAllocation and N1kvVxlanAllocation as foreign key to
+   cisco_network_profiles.id, with ondelete="CASCADE" for automatic clean up
+   of the allocation tables.
+ neutron/plugins/cisco/n1kv/n1kv_neutron_plugin.py                                   | 131 ++++++++++++++++++++++++++++++++++++++++-------------------------------------------------------------------------------------------
+ + In class N1kvNeutronPluginV2 (the n1kv core plugin class), __init__(),
+   removed call to self._initialize_network_ranges(); removed definition of
+   _initialize_network_ranges(), _add_network_vlan_range(), and _add_network(),
+   as they are no more necessary.
+ + In method N1kvNeutronPluginV2._process_provider_create(), check against
+   physical_network is performed against network_profiles instead of
+   network_vlan_ranges.
+ + In method N1kvNeutronPluginV2.delete_network(), removed the last argument to
+   n1kv_db_v2.release_vxlan() and n1kv_db_v2.release_vlan(), according to the
+   interface change.
+ + In method N1kvNeutronPluginV2.create_network_profile(), removed initializing
+   code of vlan and vxlan ranges. Majority of code contained in
+   with context.session.begin(subtransactions=True).
+ + In method N1kvNeutronPluginV2.delete_network_profile(), removed call to
+   delete vlan/vxlan allocations as they are no more necessary.
+ neutron/tests/unit/cisco/n1kv/test_n1kv_db.py                                       | 163 ++++++++++++++++++++++++++++++++++---------------------------------------------------------------------------------------------------------------------------------
+ neutron/tests/unit/cisco/n1kv/test_n1kv_plugin.py                                   |  98 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------
+ 8 files changed, 322 insertions(+), 376 deletions(-)
+
+diff --git a/neutron/db/migration/alembic_migrations/versions/5ac1c354a051_n1kv_segment_alloc.py b/neutron/db/migration/alembic_migrations/versions/5ac1c354a051_n1kv_segment_alloc.py
+new file mode 100644
+index 0000000..516faaf
+--- /dev/null
++++ b/neutron/db/migration/alembic_migrations/versions/5ac1c354a051_n1kv_segment_alloc.py
+@@ -0,0 +1,83 @@
++# Copyright 2014 OpenStack Foundation
++#
++#    Licensed under the Apache License, Version 2.0 (the "License"); you may
++#    not use this file except in compliance with the License. You may obtain
++#    a copy of the License at
++#
++#         http://www.apache.org/licenses/LICENSE-2.0
++#
++#    Unless required by applicable law or agreed to in writing, software
++#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
++#    License for the specific language governing permissions and limitations
++#    under the License.
++#
++
++"""n1kv segment allocs for cisco n1kv plugin
++
++Revision ID: 5ac1c354a051
++Revises: 538732fa21e1
++Create Date: 2014-03-05 17:36:52.952608
++
++"""
++
++# revision identifiers, used by Alembic.
++revision = '5ac1c354a051'
++down_revision = '538732fa21e1'
++
++# Change to ['*'] if this migration applies to all plugins
++
++migration_for_plugins = [
++    'neutron.plugins.cisco.network_plugin.PluginV2'
++]
++
++from alembic import op
++import sqlalchemy as sa
++
++from neutron.db import migration
++
++
++def upgrade(active_plugins=None, options=None):
++    if not migration.should_run(active_plugins, migration_for_plugins):
++        return
++
++    op.add_column(
++        'cisco_n1kv_vlan_allocations',
++        sa.Column('network_profile_id',
++                  sa.String(length=36),
++                  nullable=False)
++    )
++    op.create_foreign_key(
++        'cisco_n1kv_vlan_allocations_ibfk_1',
++        source='cisco_n1kv_vlan_allocations',
++        referent='cisco_network_profiles',
++        local_cols=['network_profile_id'], remote_cols=['id'],
++        ondelete='CASCADE'
++    )
++    op.add_column(
++        'cisco_n1kv_vxlan_allocations',
++        sa.Column('network_profile_id',
++                  sa.String(length=36),
++                  nullable=False)
++    )
++    op.create_foreign_key(
++        'cisco_n1kv_vxlan_allocations_ibfk_1',
++        source='cisco_n1kv_vxlan_allocations',
++        referent='cisco_network_profiles',
++        local_cols=['network_profile_id'], remote_cols=['id'],
++        ondelete='CASCADE'
++    )
++
++
++def downgrade(active_plugins=None, options=None):
++    if not migration.should_run(active_plugins, migration_for_plugins):
++        return
++
++    op.drop_constraint('cisco_n1kv_vxlan_allocations_ibfk_1',
++                       'cisco_n1kv_vxlan_allocations',
++                       'foreignkey')
++    op.drop_column('cisco_n1kv_vxlan_allocations', 'network_profile_id')
++    op.drop_constraint('cisco_n1kv_vlan_allocations_ibfk_1',
++                       'cisco_n1kv_vlan_allocations',
++                       'foreignkey')
++    op.drop_column('cisco_n1kv_vlan_allocations', 'network_profile_id')
+diff --git a/neutron/db/migration/alembic_migrations/versions/HEAD b/neutron/db/migration/alembic_migrations/versions/HEAD
+index 59250f3..22a65e6 100644
+--- a/neutron/db/migration/alembic_migrations/versions/HEAD
++++ b/neutron/db/migration/alembic_migrations/versions/HEAD
+@@ -1 +1 @@
+-538732fa21e1
++5ac1c354a051
+diff --git a/neutron/plugins/cisco/common/cisco_exceptions.py b/neutron/plugins/cisco/common/cisco_exceptions.py
+index b743d69..da0f3be 100644
+--- a/neutron/plugins/cisco/common/cisco_exceptions.py
++++ b/neutron/plugins/cisco/common/cisco_exceptions.py
+@@ -180,12 +180,23 @@ class VMNetworkNotFound(exceptions.NotFound):
+     message = _("VM Network %(name)s could not be found.")
+ 
+ 
+-class VxlanIdInUse(exceptions.InUse):
++class VxlanIDInUse(exceptions.InUse):
+     """VXLAN ID is in use."""
+     message = _("Unable to create the network. "
+                 "The VXLAN ID %(vxlan_id)s is in use.")
+ 
+ 
++class VxlanIDNotFound(exceptions.NotFound):
++    """VXLAN ID cannot be found."""
++    message = _("Vxlan ID %(vxlan_id)s not found.")
++
++
++class VxlanIDOutsidePool(exceptions.NeutronException):
++    """VXLAN ID cannot be allocated, as it is outside the configured pool."""
++    message = _("Unable to complete operation. VXLAN ID exists outside of the "
++                "configured network segment range.")
++
++
+ class VSMConnectionFailed(exceptions.ServiceUnavailable):
+     """Connection to VSM failed."""
+     message = _("Connection to VSM failed: %(reason)s.")
+diff --git a/neutron/plugins/cisco/db/n1kv_db_v2.py b/neutron/plugins/cisco/db/n1kv_db_v2.py
+index 69ffccf..5c23711 100644
+--- a/neutron/plugins/cisco/db/n1kv_db_v2.py
++++ b/neutron/plugins/cisco/db/n1kv_db_v2.py
+@@ -21,7 +21,6 @@
+ 
+ import netaddr
+ import re
+-from six.moves import xrange
+ from sqlalchemy.orm import exc
+ from sqlalchemy.sql import and_
+ 
+@@ -395,69 +394,28 @@ def add_port_binding(db_session, port_id, policy_profile_id):
+         db_session.add(binding)
+ 
+ 
+-def _get_sorted_vlan_ids(vlan_ranges):
+-    """Return sorted allocatable VLAN IDs."""
+-    vlan_ids = set()
+-    for vlan_range in vlan_ranges:
+-        vlan_ids |= set(xrange(vlan_range[0], vlan_range[1] + 1))
+-    return sorted(vlan_ids)
+-
+-
+-def sync_vlan_allocations(db_session, network_vlan_ranges):
++def sync_vlan_allocations(db_session, net_p):
+     """
+     Synchronize vlan_allocations table with configured VLAN ranges.
+ 
+     Sync the network profile range with the vlan_allocations table for each
+     physical network.
+     :param db_session: database session
+-    :param network_vlan_ranges: dictionary of network vlan ranges with the
+-                                physical network name as key.
+-    """
+-
+-    with db_session.begin():
+-        # process vlan ranges for each physical network separately
+-        for physical_network, vlan_ranges in network_vlan_ranges.items():
+-
+-            # determine current configured allocatable vlans for this
+-            # physical network
+-            vlan_ids = _get_sorted_vlan_ids(vlan_ranges)
+-
+-            # add missing allocatable vlans to table
+-            for vlan_id in vlan_ids:
+-                try:
+-                    alloc = get_vlan_allocation(db_session,
+-                                                physical_network,
+-                                                vlan_id)
+-                except c_exc.VlanIDNotFound:
+-                    alloc = n1kv_models_v2.N1kvVlanAllocation(
+-                        physical_network=physical_network, vlan_id=vlan_id)
+-                    db_session.add(alloc)
+-
+-
+-def delete_vlan_allocations(db_session, network_vlan_ranges):
++    :param net_p: network profile dictionary
+     """
+-    Delete vlan_allocations for deleted network profile range.
+-
+-    :param db_session: database session
+-    :param network_vlan_ranges: dictionary of network vlan ranges with the
+-                                physical network name as key.
+-    """
+-
+-    with db_session.begin():
+-        # process vlan ranges for each physical network separately
+-        for physical_network, vlan_ranges in network_vlan_ranges.items():
+-            # Determine the set of vlan ids which need to be deleted.
+-            vlan_ids = _get_sorted_vlan_ids(vlan_ranges)
+-            allocs = (db_session.query(n1kv_models_v2.N1kvVlanAllocation).
+-                      filter_by(physical_network=physical_network).
+-                      filter_by(allocated=False))
+-            for alloc in allocs:
+-                if alloc.vlan_id in vlan_ids:
+-                    LOG.debug(_("Removing vlan %(vlan)s on physical "
+-                                "network %(network)s from pool"),
+-                              {"vlan": alloc.vlan_id,
+-                               "network": physical_network})
+-                    db_session.delete(alloc)
++    with db_session.begin(subtransactions=True):
++        seg_min, seg_max = get_segment_range(net_p)
++        for vlan_id in range(seg_min, seg_max + 1):
++            try:
++                get_vlan_allocation(db_session,
++                                    net_p['physical_network'],
++                                    vlan_id)
++            except c_exc.VlanIDNotFound:
++                alloc = n1kv_models_v2.N1kvVlanAllocation(
++                    physical_network=net_p['physical_network'],
++                    vlan_id=vlan_id,
++                    network_profile_id=net_p['id'])
++                db_session.add(alloc)
+ 
+ 
+ def get_vlan_allocation(db_session, physical_network, vlan_id):
+@@ -578,25 +536,19 @@ def reserve_specific_vlan(db_session, physical_network, vlan_id):
+             LOG.debug(_("Reserving specific vlan %(vlan)s on physical "
+                         "network %(network)s from pool"),
+                       {"vlan": vlan_id, "network": physical_network})
+-        except exc.NoResultFound:
+-            LOG.debug(_("Reserving specific vlan %(vlan)s on physical "
+-                        "network %(network)s outside pool"),
+-                      {"vlan": vlan_id, "network": physical_network})
+-            alloc = n1kv_models_v2.N1kvVlanAllocation(
+-                physical_network=physical_network, vlan_id=vlan_id)
++            alloc.allocated = True
+             db_session.add(alloc)
+-        alloc.allocated = True
++        except exc.NoResultFound:
++            raise c_exc.VlanIDOutsidePool
+ 
+ 
+-def release_vlan(db_session, physical_network, vlan_id, network_vlan_ranges):
++def release_vlan(db_session, physical_network, vlan_id):
+     """
+     Release a given VLAN ID.
+ 
+     :param db_session: database session
+     :param physical_network: string representing the name of physical network
+     :param vlan_id: integer value of the segmentation ID to be released
+-    :param network_vlan_ranges: dictionary of network vlan ranges with the
+-                                physical network name as key.
+     """
+     with db_session.begin(subtransactions=True):
+         try:
+@@ -605,70 +557,34 @@ def release_vlan(db_session, physical_network, vlan_id, network_vlan_ranges):
+                                vlan_id=vlan_id).
+                      one())
+             alloc.allocated = False
+-            for vlan_range in network_vlan_ranges.get(physical_network, []):
+-                if vlan_range[0] <= vlan_id <= vlan_range[1]:
+-                    msg = _("Releasing vlan %(vlan)s on physical "
+-                            "network %(network)s to pool")
+-                    break
+-            else:
+-                db_session.delete(alloc)
+-                msg = _("Releasing vlan %(vlan)s on physical "
+-                        "network %(network)s outside pool")
+-            LOG.debug(msg, {"vlan": vlan_id, "network": physical_network})
+         except exc.NoResultFound:
+             LOG.warning(_("vlan_id %(vlan)s on physical network %(network)s "
+                           "not found"),
+                         {"vlan": vlan_id, "network": physical_network})
+ 
+ 
+-def _get_sorted_vxlan_ids(vxlan_id_ranges):
+-    """Return sorted VXLAN IDs."""
+-    vxlan_ids = set()
+-    for vxlan_min, vxlan_max in vxlan_id_ranges:
+-        if vxlan_max + 1 - vxlan_min > c_const.MAX_VXLAN_RANGE:
+-            LOG.error(_("Skipping unreasonable vxlan ID range %(vxlan_min)s - "
+-                        "%(vxlan_max)s"),
+-                      {"vxlan_min": vxlan_min, "vxlan_max": vxlan_max})
+-        else:
+-            vxlan_ids |= set(xrange(vxlan_min, vxlan_max + 1))
+-    return sorted(vxlan_ids)
+-
+-
+-def sync_vxlan_allocations(db_session, vxlan_id_ranges):
++def sync_vxlan_allocations(db_session, net_p):
+     """
+     Synchronize vxlan_allocations table with configured vxlan ranges.
+ 
+     :param db_session: database session
+-    :param vxlan_id_ranges: list of segment range tuples
++    :param net_p: network profile dictionary
+     """
+-
+-    vxlan_ids = _get_sorted_vxlan_ids(vxlan_id_ranges)
+-    with db_session.begin():
+-        for vxlan_id in vxlan_ids:
+-            alloc = get_vxlan_allocation(db_session, vxlan_id)
+-            if not alloc:
+-                alloc = n1kv_models_v2.N1kvVxlanAllocation(vxlan_id=vxlan_id)
++    seg_min, seg_max = get_segment_range(net_p)
++    if seg_max + 1 - seg_min > c_const.MAX_VXLAN_RANGE:
++        msg = (_("Unreasonable vxlan ID range %(vxlan_min)s - %(vxlan_max)s"),
++               {"vxlan_min": seg_min, "vxlan_max": seg_max})
++        raise n_exc.InvalidInput(error_message=msg)
++    with db_session.begin(subtransactions=True):
++        for vxlan_id in range(seg_min, seg_max + 1):
++            try:
++                get_vxlan_allocation(db_session, vxlan_id)
++            except c_exc.VxlanIDNotFound:
++                alloc = n1kv_models_v2.N1kvVxlanAllocation(
++                    network_profile_id=net_p['id'], vxlan_id=vxlan_id)
+                 db_session.add(alloc)
+ 
+ 
+-def delete_vxlan_allocations(db_session, vxlan_id_ranges):
+-    """
+-    Delete vxlan_allocations for deleted network profile range.
+-
+-    :param db_session: database session
+-    :param vxlan_id_ranges: list of segment range tuples
+-    """
+-    vxlan_ids = _get_sorted_vxlan_ids(vxlan_id_ranges)
+-    with db_session.begin():
+-        allocs = (db_session.query(n1kv_models_v2.N1kvVxlanAllocation).
+-                  filter_by(allocated=False))
+-        for alloc in allocs:
+-            if alloc.vxlan_id in vxlan_ids:
+-                LOG.debug(_("Removing vxlan %s from pool"),
+-                          alloc.vxlan_id)
+-                db_session.delete(alloc)
+-
+-
+ def get_vxlan_allocation(db_session, vxlan_id):
+     """
+     Retrieve VXLAN allocation for the given VXLAN ID.
+@@ -677,8 +593,11 @@ def get_vxlan_allocation(db_session, vxlan_id):
+     :param vxlan_id: integer value representing the segmentation ID
+     :returns: allocation object
+     """
+-    return (db_session.query(n1kv_models_v2.N1kvVxlanAllocation).
+-            filter_by(vxlan_id=vxlan_id).first())
++    try:
++        return (db_session.query(n1kv_models_v2.N1kvVxlanAllocation).
++                filter_by(vxlan_id=vxlan_id).one())
++    except exc.NoResultFound:
++        raise c_exc.VxlanIDNotFound(vxlan_id=vxlan_id)
+ 
+ 
+ def reserve_specific_vxlan(db_session, vxlan_id):
+@@ -694,22 +613,20 @@ def reserve_specific_vxlan(db_session, vxlan_id):
+                      filter_by(vxlan_id=vxlan_id).
+                      one())
+             if alloc.allocated:
+-                raise c_exc.VxlanIdInUse(vxlan_id=vxlan_id)
++                raise c_exc.VxlanIDInUse(vxlan_id=vxlan_id)
+             LOG.debug(_("Reserving specific vxlan %s from pool"), vxlan_id)
+-        except exc.NoResultFound:
+-            LOG.debug(_("Reserving specific vxlan %s outside pool"), vxlan_id)
+-            alloc = n1kv_models_v2.N1kvVxlanAllocation(vxlan_id=vxlan_id)
++            alloc.allocated = True
+             db_session.add(alloc)
+-        alloc.allocated = True
++        except exc.NoResultFound:
++            raise c_exc.VxlanIDOutsidePool
+ 
+ 
+-def release_vxlan(db_session, vxlan_id, vxlan_id_ranges):
++def release_vxlan(db_session, vxlan_id):
+     """
+     Release a given VXLAN ID.
+ 
+     :param db_session: database session
+     :param vxlan_id: integer value representing the segmentation ID
+-    :param vxlan_id_ranges: list of the segment range tuples.
+     """
+     with db_session.begin(subtransactions=True):
+         try:
+@@ -717,14 +634,6 @@ def release_vxlan(db_session, vxlan_id, vxlan_id_ranges):
+                      filter_by(vxlan_id=vxlan_id).
+                      one())
+             alloc.allocated = False
+-            for vxlan_id_range in vxlan_id_ranges:
+-                if vxlan_id_range[0] <= vxlan_id <= vxlan_id_range[1]:
+-                    msg = _("Releasing vxlan %s to pool")
+-                    break
+-            else:
+-                db_session.delete(alloc)
+-                msg = _("Releasing vxlan %s outside pool")
+-            LOG.debug(msg, vxlan_id)
+         except exc.NoResultFound:
+             LOG.warning(_("vxlan_id %s not found"), vxlan_id)
+ 
+@@ -1087,15 +996,20 @@ class NetworkProfile_db_mixin(object):
+         self._replace_fake_tenant_id_with_real(context)
+         p = network_profile["network_profile"]
+         self._validate_network_profile_args(context, p)
+-        net_profile = create_network_profile(context.session, p)
+-        create_profile_binding(context.session,
+-                               context.tenant_id,
+-                               net_profile.id,
+-                               c_const.NETWORK)
+-        if p.get("add_tenant"):
+-            self.add_network_profile_tenant(context.session,
+-                                            net_profile.id,
+-                                            p["add_tenant"])
++        with context.session.begin(subtransactions=True):
++            net_profile = create_network_profile(context.session, p)
++            if net_profile.segment_type == c_const.NETWORK_TYPE_VLAN:
++                sync_vlan_allocations(context.session, net_profile)
++            elif net_profile.segment_type == c_const.NETWORK_TYPE_OVERLAY:
++                sync_vxlan_allocations(context.session, net_profile)
++            create_profile_binding(context.session,
++                                   context.tenant_id,
++                                   net_profile.id,
++                                   c_const.NETWORK)
++            if p.get("add_tenant"):
++                self.add_network_profile_tenant(context.session,
++                                                net_profile.id,
++                                                p["add_tenant"])
+         return self._make_network_profile_dict(net_profile)
+ 
+     def delete_network_profile(self, context, id):
+diff --git a/neutron/plugins/cisco/db/n1kv_models_v2.py b/neutron/plugins/cisco/db/n1kv_models_v2.py
+index f8890ba..6c81aab 100644
+--- a/neutron/plugins/cisco/db/n1kv_models_v2.py
++++ b/neutron/plugins/cisco/db/n1kv_models_v2.py
+@@ -39,6 +39,10 @@ class N1kvVlanAllocation(model_base.BASEV2):
+     vlan_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
+                         autoincrement=False)
+     allocated = sa.Column(sa.Boolean, nullable=False, default=False)
++    network_profile_id = sa.Column(sa.String(36),
++                                   sa.ForeignKey('cisco_network_profiles.id',
++                                                 ondelete="CASCADE"),
++                                   nullable=False)
+ 
+ 
+ class N1kvVxlanAllocation(model_base.BASEV2):
+@@ -49,6 +53,10 @@ class N1kvVxlanAllocation(model_base.BASEV2):
+     vxlan_id = sa.Column(sa.Integer, nullable=False, primary_key=True,
+                          autoincrement=False)
+     allocated = sa.Column(sa.Boolean, nullable=False, default=False)
++    network_profile_id = sa.Column(sa.String(36),
++                                   sa.ForeignKey('cisco_network_profiles.id',
++                                                 ondelete="CASCADE"),
++                                   nullable=False)
+ 
+ 
+ class N1kvPortBinding(model_base.BASEV2):
+diff --git a/neutron/plugins/cisco/n1kv/n1kv_neutron_plugin.py b/neutron/plugins/cisco/n1kv/n1kv_neutron_plugin.py
+index 1a312c5..1e657d3 100644
+--- a/neutron/plugins/cisco/n1kv/n1kv_neutron_plugin.py
++++ b/neutron/plugins/cisco/n1kv/n1kv_neutron_plugin.py
+@@ -117,7 +117,6 @@ class N1kvNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+                 portbindings.CAP_PORT_FILTER:
+                 'security-group' in self.supported_extension_aliases}}
+         c_cred.Store.initialize()
+-        self._initialize_network_ranges()
+         self._setup_vsm()
+         self._setup_rpc()
+ 
+@@ -214,28 +213,6 @@ class N1kvNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+                 cisco_exceptions.VSMConnectionFailed):
+             LOG.warning(_('No policy profile updated from VSM'))
+ 
+-    def _initialize_network_ranges(self):
+-        self.network_vlan_ranges = {}
+-        self.vxlan_id_ranges = []
+-        network_profiles = n1kv_db_v2._get_network_profiles()
+-        for network_profile in network_profiles:
+-            seg_min, seg_max = self._get_segment_range(
+-                network_profile['segment_range'])
+-            if network_profile['segment_type'] == c_const.NETWORK_TYPE_VLAN:
+-                self._add_network_vlan_range(network_profile[
+-                    'physical_network'], int(seg_min), int(seg_max))
+-            elif network_profile['segment_type'] == (c_const.
+-                                                     NETWORK_TYPE_OVERLAY):
+-                self.vxlan_id_ranges.append((int(seg_min), int(seg_max)))
+-
+-    def _add_network_vlan_range(self, physical_network, vlan_min, vlan_max):
+-        self._add_network(physical_network)
+-        self.network_vlan_ranges[physical_network].append((vlan_min, vlan_max))
+-
+-    def _add_network(self, physical_network):
+-        if physical_network not in self.network_vlan_ranges:
+-            self.network_vlan_ranges[physical_network] = []
+-
+     def _extend_network_dict_provider(self, context, network):
+         """Add extended network parameters."""
+         binding = n1kv_db_v2.get_network_binding(context.session,
+@@ -301,12 +278,15 @@ class N1kvNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+ 
+         if network_type == c_const.NETWORK_TYPE_VLAN:
+             if physical_network_set:
+-                if physical_network not in self.network_vlan_ranges:
+-                    msg = (_("Unknown provider:physical_network %s") %
++                network_profiles = n1kv_db_v2.get_network_profiles()
++                for network_profile in network_profiles:
++                    if physical_network == network_profile[
++                        'physical_network']:
++                        break
++                else:
++                    msg = (_("Unknown provider:physical_network %s"),
+                            physical_network)
+                     raise n_exc.InvalidInput(error_message=msg)
+-            elif 'default' in self.network_vlan_ranges:
+-                physical_network = 'default'
+             else:
+                 msg = _("provider:physical_network required")
+                 raise n_exc.InvalidInput(error_message=msg)
+@@ -1113,23 +1093,16 @@ class N1kvNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+                 msg = _("Cannot delete network '%s' that is a member of a "
+                         "multi-segment network") % network['name']
+                 raise n_exc.InvalidInput(error_message=msg)
+-            if self.agent_vsm:
+-                try:
+-                    self._send_delete_network_request(context, network)
+-                except(cisco_exceptions.VSMError,
+-                       cisco_exceptions.VSMConnectionFailed):
+-                    LOG.debug(_('Delete failed in VSM'))
+-            super(N1kvNeutronPluginV2, self).delete_network(context, id)
+             if binding.network_type == c_const.NETWORK_TYPE_OVERLAY:
+-                n1kv_db_v2.release_vxlan(session, binding.segmentation_id,
+-                                         self.vxlan_id_ranges)
++                n1kv_db_v2.release_vxlan(session, binding.segmentation_id)
+             elif binding.network_type == c_const.NETWORK_TYPE_VLAN:
+                 n1kv_db_v2.release_vlan(session, binding.physical_network,
+-                                        binding.segmentation_id,
+-                                        self.network_vlan_ranges)
+-                # the network_binding record is deleted via cascade from
+-                # the network record, so explicit removal is not necessary
+-        LOG.debug(_("Deleted network: %s"), id)
++                                        binding.segmentation_id)
++            # the network_binding record is deleted via cascade from
++            # the network record, so explicit removal is not necessary
++            self._send_delete_network_request(context, network)
++            super(N1kvNeutronPluginV2, self).delete_network(context, id)
++            LOG.debug(_("Deleted network: %s"), id)
+ 
+     def get_network(self, context, id, fields=None):
+         """
+@@ -1390,40 +1363,27 @@ class N1kvNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+         :returns: network profile object
+         """
+         self._replace_fake_tenant_id_with_real(context)
+-        _network_profile = super(
+-            N1kvNeutronPluginV2, self).create_network_profile(context,
+-                                                              network_profile)
+-        if _network_profile['segment_type'] in [c_const.NETWORK_TYPE_VLAN,
+-                                                c_const.NETWORK_TYPE_OVERLAY]:
+-            seg_min, seg_max = self._get_segment_range(
+-                _network_profile['segment_range'])
+-            if _network_profile['segment_type'] == c_const.NETWORK_TYPE_VLAN:
+-                self._add_network_vlan_range(
+-                    _network_profile['physical_network'], int(seg_min),
+-                    int(seg_max))
+-                n1kv_db_v2.sync_vlan_allocations(context.session,
+-                                                 self.network_vlan_ranges)
+-            else:
+-                self.vxlan_id_ranges = [(int(seg_min), int(seg_max))]
+-                n1kv_db_v2.sync_vxlan_allocations(context.session,
+-                                                  self.vxlan_id_ranges)
+-        try:
+-            self._send_create_logical_network_request(_network_profile,
+-                                                      context.tenant_id)
+-        except(cisco_exceptions.VSMError,
+-               cisco_exceptions.VSMConnectionFailed):
+-            super(N1kvNeutronPluginV2, self).delete_network_profile(
+-                context, _network_profile['id'])
+-        try:
+-            self._send_create_network_profile_request(context,
+-                                                      _network_profile)
+-        except(cisco_exceptions.VSMError,
+-               cisco_exceptions.VSMConnectionFailed):
+-            self._send_delete_logical_network_request(_network_profile)
+-            super(N1kvNeutronPluginV2, self).delete_network_profile(
+-                context, _network_profile['id'])
+-        else:
+-            return _network_profile
++        with context.session.begin(subtransactions=True):
++            net_p = super(N1kvNeutronPluginV2,
++                          self).create_network_profile(context,
++                                                       network_profile)
++            try:
++                self._send_create_logical_network_request(net_p,
++                                                          context.tenant_id)
++            except(cisco_exceptions.VSMError,
++                   cisco_exceptions.VSMConnectionFailed):
++                n1kv_db_v2.delete_profile_binding(context.session,
++                                                  context.tenant_id,
++                                                  net_p['id'])
++            try:
++                self._send_create_network_profile_request(context, net_p)
++            except(cisco_exceptions.VSMError,
++                   cisco_exceptions.VSMConnectionFailed):
++                n1kv_db_v2.delete_profile_binding(context.session,
++                                                  context.tenant_id,
++                                                  net_p['id'])
++                self._send_delete_logical_network_request(net_p)
++        return net_p
+ 
+     def delete_network_profile(self, context, id):
+         """
+@@ -1433,22 +1393,11 @@ class N1kvNeutronPluginV2(db_base_plugin_v2.NeutronDbPluginV2,
+         :param id: UUID of the network profile to delete
+         :returns: deleted network profile object
+         """
+-        _network_profile = super(
+-            N1kvNeutronPluginV2, self).delete_network_profile(context, id)
+-        seg_min, seg_max = self._get_segment_range(
+-            _network_profile['segment_range'])
+-        if _network_profile['segment_type'] == c_const.NETWORK_TYPE_VLAN:
+-            self._add_network_vlan_range(_network_profile['physical_network'],
+-                                         int(seg_min),
+-                                         int(seg_max))
+-            n1kv_db_v2.delete_vlan_allocations(context.session,
+-                                               self.network_vlan_ranges)
+-        elif _network_profile['segment_type'] == c_const.NETWORK_TYPE_OVERLAY:
+-            self.delete_vxlan_ranges = []
+-            self.delete_vxlan_ranges.append((int(seg_min), int(seg_max)))
+-            n1kv_db_v2.delete_vxlan_allocations(context.session,
+-                                                self.delete_vxlan_ranges)
+-        self._send_delete_network_profile_request(_network_profile)
++        with context.session.begin(subtransactions=True):
++            net_p = super(N1kvNeutronPluginV2,
++                          self).delete_network_profile(context, id)
++            self._send_delete_network_profile_request(net_p)
++            self._send_delete_logical_network_request(net_p)
+ 
+     def update_network_profile(self, context, net_profile_id, network_profile):
+         """
+diff --git a/neutron/tests/unit/cisco/n1kv/test_n1kv_db.py b/neutron/tests/unit/cisco/n1kv/test_n1kv_db.py
+index 8acec2b..f8d5443 100644
+--- a/neutron/tests/unit/cisco/n1kv/test_n1kv_db.py
++++ b/neutron/tests/unit/cisco/n1kv/test_n1kv_db.py
+@@ -38,13 +38,8 @@ PHYS_NET = 'physnet1'
+ PHYS_NET_2 = 'physnet2'
+ VLAN_MIN = 10
+ VLAN_MAX = 19
+-VLAN_RANGES = {PHYS_NET: [(VLAN_MIN, VLAN_MAX)]}
+-UPDATED_VLAN_RANGES = {PHYS_NET: [(VLAN_MIN + 20, VLAN_MAX + 20)],
+-                       PHYS_NET_2: [(VLAN_MIN + 40, VLAN_MAX + 40)]}
+ VXLAN_MIN = 5000
+ VXLAN_MAX = 5009
+-VXLAN_RANGES = [(VXLAN_MIN, VXLAN_MAX)]
+-UPDATED_VXLAN_RANGES = [(VXLAN_MIN + 20, VXLAN_MAX + 20)]
+ SEGMENT_RANGE = '200-220'
+ SEGMENT_RANGE_MIN_OVERLAP = '210-230'
+ SEGMENT_RANGE_MAX_OVERLAP = '190-209'
+@@ -103,7 +98,8 @@ class VlanAllocationsTest(base.BaseTestCase):
+         super(VlanAllocationsTest, self).setUp()
+         db.configure_db()
+         self.session = db.get_session()
+-        n1kv_db_v2.sync_vlan_allocations(self.session, VLAN_RANGES)
++        self.net_p = _create_test_network_profile_if_not_there(self.session)
++        n1kv_db_v2.sync_vlan_allocations(self.session, self.net_p)
+         self.addCleanup(db.clear_db)
+ 
+     def test_sync_vlan_allocations_outside_segment_range(self):
+@@ -117,28 +113,6 @@ class VlanAllocationsTest(base.BaseTestCase):
+                           self.session,
+                           PHYS_NET,
+                           VLAN_MAX + 1)
+-        n1kv_db_v2.sync_vlan_allocations(self.session, UPDATED_VLAN_RANGES)
+-        self.assertRaises(c_exc.VlanIDNotFound,
+-                          n1kv_db_v2.get_vlan_allocation,
+-                          self.session,
+-                          PHYS_NET,
+-                          VLAN_MIN + 20 - 1)
+-        self.assertRaises(c_exc.VlanIDNotFound,
+-                          n1kv_db_v2.get_vlan_allocation,
+-                          self.session,
+-                          PHYS_NET,
+-                          VLAN_MAX + 20 + 1)
+-        self.assertRaises(c_exc.VlanIDNotFound,
+-                          n1kv_db_v2.get_vlan_allocation,
+-                          self.session,
+-                          PHYS_NET_2,
+-                          VLAN_MIN + 40 - 1)
+-        self.assertRaises(c_exc.VlanIDNotFound,
+-                          n1kv_db_v2.get_vlan_allocation,
+-                          self.session,
+-                          PHYS_NET_2,
+-                          VLAN_MAX + 40 + 1)
+-        n1kv_db_v2.sync_vlan_allocations(self.session, VLAN_RANGES)
+         self.assertRaises(c_exc.VlanIDNotFound,
+                           n1kv_db_v2.get_vlan_allocation,
+                           self.session,
+@@ -170,45 +144,12 @@ class VlanAllocationsTest(base.BaseTestCase):
+         self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+                                                         PHYS_NET,
+                                                         VLAN_MAX).allocated)
+-        n1kv_db_v2.sync_vlan_allocations(self.session, UPDATED_VLAN_RANGES)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+-                                                        PHYS_NET,
+-                                                        VLAN_MIN + 20).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+-                                                        PHYS_NET,
+-                                                        VLAN_MIN + 20 + 1).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+-                                                        PHYS_NET,
+-                                                        VLAN_MAX + 20 - 1).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session, PHYS_NET,
+-                                                        VLAN_MAX + 20).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+-                                                        PHYS_NET_2,
+-                                                        VLAN_MIN + 40).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+-                                                        PHYS_NET_2,
+-                                                        VLAN_MIN + 40 + 1).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+-                                                        PHYS_NET_2,
+-                                                        VLAN_MAX + 40 - 1).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+-                                                        PHYS_NET_2,
+-                                                        VLAN_MAX + 40).
+-                         allocated)
+ 
+     def test_vlan_pool(self):
+         vlan_ids = set()
+-        p = _create_test_network_profile_if_not_there(self.session)
+         for x in xrange(VLAN_MIN, VLAN_MAX + 1):
+             (physical_network, seg_type,
+-             vlan_id, m_ip) = n1kv_db_v2.reserve_vlan(self.session, p)
++             vlan_id, m_ip) = n1kv_db_v2.reserve_vlan(self.session, self.net_p)
+             self.assertEqual(physical_network, PHYS_NET)
+             self.assertThat(vlan_id, matchers.GreaterThan(VLAN_MIN - 1))
+             self.assertThat(vlan_id, matchers.LessThan(VLAN_MAX + 1))
+@@ -217,20 +158,18 @@ class VlanAllocationsTest(base.BaseTestCase):
+         self.assertRaises(n_exc.NoNetworkAvailable,
+                           n1kv_db_v2.reserve_vlan,
+                           self.session,
+-                          p)
++                          self.net_p)
+ 
+-        n1kv_db_v2.release_vlan(self.session, PHYS_NET, vlan_ids.pop(),
+-                                VLAN_RANGES)
++        n1kv_db_v2.release_vlan(self.session, PHYS_NET, vlan_ids.pop())
+         physical_network, seg_type, vlan_id, m_ip = (n1kv_db_v2.reserve_vlan(
+-                                                     self.session, p))
++                                                     self.session, self.net_p))
+         self.assertEqual(physical_network, PHYS_NET)
+         self.assertThat(vlan_id, matchers.GreaterThan(VLAN_MIN - 1))
+         self.assertThat(vlan_id, matchers.LessThan(VLAN_MAX + 1))
+         vlan_ids.add(vlan_id)
+ 
+         for vlan_id in vlan_ids:
+-            n1kv_db_v2.release_vlan(self.session, PHYS_NET, vlan_id,
+-                                    VLAN_RANGES)
++            n1kv_db_v2.release_vlan(self.session, PHYS_NET, vlan_id)
+ 
+     def test_specific_vlan_inside_pool(self):
+         vlan_id = VLAN_MIN + 5
+@@ -248,7 +187,7 @@ class VlanAllocationsTest(base.BaseTestCase):
+                           PHYS_NET,
+                           vlan_id)
+ 
+-        n1kv_db_v2.release_vlan(self.session, PHYS_NET, vlan_id, VLAN_RANGES)
++        n1kv_db_v2.release_vlan(self.session, PHYS_NET, vlan_id)
+         self.assertFalse(n1kv_db_v2.get_vlan_allocation(self.session,
+                                                         PHYS_NET,
+                                                         vlan_id).allocated)
+@@ -260,23 +199,12 @@ class VlanAllocationsTest(base.BaseTestCase):
+                           self.session,
+                           PHYS_NET,
+                           vlan_id)
+-        n1kv_db_v2.reserve_specific_vlan(self.session, PHYS_NET, vlan_id)
+-        self.assertTrue(n1kv_db_v2.get_vlan_allocation(self.session, PHYS_NET,
+-                                                       vlan_id).allocated)
+-
+-        self.assertRaises(n_exc.VlanIdInUse,
++        self.assertRaises(c_exc.VlanIDOutsidePool,
+                           n1kv_db_v2.reserve_specific_vlan,
+                           self.session,
+                           PHYS_NET,
+                           vlan_id)
+ 
+-        n1kv_db_v2.release_vlan(self.session, PHYS_NET, vlan_id, VLAN_RANGES)
+-        self.assertRaises(c_exc.VlanIDNotFound,
+-                          n1kv_db_v2.get_vlan_allocation,
+-                          self.session,
+-                          PHYS_NET,
+-                          vlan_id)
+-
+ 
+ class VxlanAllocationsTest(base.BaseTestCase,
+                            n1kv_db_v2.NetworkProfile_db_mixin):
+@@ -285,19 +213,20 @@ class VxlanAllocationsTest(base.BaseTestCase,
+         super(VxlanAllocationsTest, self).setUp()
+         db.configure_db()
+         self.session = db.get_session()
+-        n1kv_db_v2.sync_vxlan_allocations(self.session, VXLAN_RANGES)
++        self.net_p = _create_test_network_profile_if_not_there(
++            self.session, TEST_NETWORK_PROFILE_VXLAN)
++        n1kv_db_v2.sync_vxlan_allocations(self.session, self.net_p)
+         self.addCleanup(db.clear_db)
+ 
+     def test_sync_vxlan_allocations_outside_segment_range(self):
+-        self.assertIsNone(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                          VXLAN_MIN - 1))
+-        self.assertIsNone(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                          VXLAN_MAX + 1))
+-        n1kv_db_v2.sync_vxlan_allocations(self.session, UPDATED_VXLAN_RANGES)
+-        self.assertIsNone(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                          VXLAN_MIN + 20 - 1))
+-        self.assertIsNone(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                          VXLAN_MAX + 20 + 1))
++        self.assertRaises(c_exc.VxlanIDNotFound,
++                          n1kv_db_v2.get_vxlan_allocation,
++                          self.session,
++                          VXLAN_MIN - 1)
++        self.assertRaises(c_exc.VxlanIDNotFound,
++                          n1kv_db_v2.get_vxlan_allocation,
++                          self.session,
++                          VXLAN_MAX + 1)
+ 
+     def test_sync_vxlan_allocations_unallocated_vxlans(self):
+         self.assertFalse(n1kv_db_v2.get_vxlan_allocation(self.session,
+@@ -310,26 +239,11 @@ class VxlanAllocationsTest(base.BaseTestCase,
+                          allocated)
+         self.assertFalse(n1kv_db_v2.get_vxlan_allocation(self.session,
+                                                          VXLAN_MAX).allocated)
+-        n1kv_db_v2.sync_vxlan_allocations(self.session, UPDATED_VXLAN_RANGES)
+-        self.assertFalse(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                         VXLAN_MIN + 20).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                         VXLAN_MIN + 20 + 1).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                         VXLAN_MAX + 20 - 1).
+-                         allocated)
+-        self.assertFalse(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                         VXLAN_MAX + 20).
+-                         allocated)
+ 
+     def test_vxlan_pool(self):
+         vxlan_ids = set()
+-        profile = n1kv_db_v2.create_network_profile(self.session,
+-                                                    TEST_NETWORK_PROFILE_VXLAN)
+         for x in xrange(VXLAN_MIN, VXLAN_MAX + 1):
+-            vxlan = n1kv_db_v2.reserve_vxlan(self.session, profile)
++            vxlan = n1kv_db_v2.reserve_vxlan(self.session, self.net_p)
+             vxlan_id = vxlan[2]
+             self.assertThat(vxlan_id, matchers.GreaterThan(VXLAN_MIN - 1))
+             self.assertThat(vxlan_id, matchers.LessThan(VXLAN_MAX + 1))
+@@ -338,17 +252,17 @@ class VxlanAllocationsTest(base.BaseTestCase,
+         self.assertRaises(n_exc.NoNetworkAvailable,
+                           n1kv_db_v2.reserve_vxlan,
+                           self.session,
+-                          profile)
+-        n1kv_db_v2.release_vxlan(self.session, vxlan_ids.pop(), VXLAN_RANGES)
+-        vxlan = n1kv_db_v2.reserve_vxlan(self.session, profile)
++                          self.net_p)
++        n1kv_db_v2.release_vxlan(self.session, vxlan_ids.pop())
++        vxlan = n1kv_db_v2.reserve_vxlan(self.session, self.net_p)
+         vxlan_id = vxlan[2]
+         self.assertThat(vxlan_id, matchers.GreaterThan(VXLAN_MIN - 1))
+         self.assertThat(vxlan_id, matchers.LessThan(VXLAN_MAX + 1))
+         vxlan_ids.add(vxlan_id)
+ 
+         for vxlan_id in vxlan_ids:
+-            n1kv_db_v2.release_vxlan(self.session, vxlan_id, VXLAN_RANGES)
+-        n1kv_db_v2.delete_network_profile(self.session, profile.id)
++            n1kv_db_v2.release_vxlan(self.session, vxlan_id)
++        n1kv_db_v2.delete_network_profile(self.session, self.net_p.id)
+ 
+     def test_specific_vxlan_inside_pool(self):
+         vxlan_id = VXLAN_MIN + 5
+@@ -358,32 +272,26 @@ class VxlanAllocationsTest(base.BaseTestCase,
+         self.assertTrue(n1kv_db_v2.get_vxlan_allocation(self.session,
+                                                         vxlan_id).allocated)
+ 
+-        self.assertRaises(c_exc.VxlanIdInUse,
++        self.assertRaises(c_exc.VxlanIDInUse,
+                           n1kv_db_v2.reserve_specific_vxlan,
+                           self.session,
+                           vxlan_id)
+ 
+-        n1kv_db_v2.release_vxlan(self.session, vxlan_id, VXLAN_RANGES)
++        n1kv_db_v2.release_vxlan(self.session, vxlan_id)
+         self.assertFalse(n1kv_db_v2.get_vxlan_allocation(self.session,
+                                                          vxlan_id).allocated)
+ 
+     def test_specific_vxlan_outside_pool(self):
+         vxlan_id = VXLAN_MAX + 5
+-        self.assertIsNone(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                          vxlan_id))
+-        n1kv_db_v2.reserve_specific_vxlan(self.session, vxlan_id)
+-        self.assertTrue(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                        vxlan_id).allocated)
+-
+-        self.assertRaises(c_exc.VxlanIdInUse,
++        self.assertRaises(c_exc.VxlanIDNotFound,
++                          n1kv_db_v2.get_vxlan_allocation,
++                          self.session,
++                          vxlan_id)
++        self.assertRaises(c_exc.VxlanIDOutsidePool,
+                           n1kv_db_v2.reserve_specific_vxlan,
+                           self.session,
+                           vxlan_id)
+ 
+-        n1kv_db_v2.release_vxlan(self.session, vxlan_id, VXLAN_RANGES)
+-        self.assertIsNone(n1kv_db_v2.get_vxlan_allocation(self.session,
+-                                                          vxlan_id))
+-
+ 
+ class NetworkBindingsTest(test_plugin.NeutronDbPluginV2TestCase):
+ 
+@@ -943,8 +851,7 @@ class ProfileBindingTests(base.BaseTestCase,
+                                           test_profile_id,
+                                           test_profile_type)
+         network_profile = {"network_profile": TEST_NETWORK_PROFILE}
+-        test_network_profile = self.create_network_profile(ctx,
+-                                                           network_profile)
++        self.create_network_profile(ctx, network_profile)
+         binding = n1kv_db_v2.get_profile_binding(self.session,
+                                                  ctx.tenant_id,
+                                                  test_profile_id)
+@@ -954,5 +861,3 @@ class ProfileBindingTests(base.BaseTestCase,
+             test_profile_id))
+         self.assertNotEqual(binding.tenant_id,
+                             cisco_constants.TENANT_ID_NOT_SET)
+-        n1kv_db_v2.delete_network_profile(self.session,
+-                                          test_network_profile['id'])
+diff --git a/neutron/tests/unit/cisco/n1kv/test_n1kv_plugin.py b/neutron/tests/unit/cisco/n1kv/test_n1kv_plugin.py
+index cd107fa..ac96a6d 100644
+--- a/neutron/tests/unit/cisco/n1kv/test_n1kv_plugin.py
++++ b/neutron/tests/unit/cisco/n1kv/test_n1kv_plugin.py
+@@ -24,6 +24,7 @@ from neutron.api.v2 import attributes
+ from neutron import context
+ import neutron.db.api as db
+ from neutron.extensions import portbindings
++from neutron.plugins.cisco.common import cisco_exceptions as c_exc
+ from neutron.plugins.cisco.db import n1kv_db_v2
+ from neutron.plugins.cisco.db import network_db_v2 as cdb
+ from neutron.plugins.cisco import extensions
+@@ -36,6 +37,11 @@ from neutron.tests.unit import test_api_v2
+ from neutron.tests.unit import test_db_plugin as test_plugin
+ 
+ 
++PHYS_NET = 'some-phys-net'
++VLAN_MIN = 100
++VLAN_MAX = 110
++
++
+ class FakeResponse(object):
+ 
+     """
+@@ -105,23 +111,27 @@ class N1kvPluginTestCase(test_plugin.NeutronDbPluginV2TestCase):
+                    'name': name}
+         return n1kv_db_v2.create_policy_profile(profile)
+ 
+-    def _make_test_profile(self, name='default_network_profile'):
++    def _make_test_profile(self,
++                           name='default_network_profile',
++                           segment_range='386-400'):
+         """
+         Create a profile record for testing purposes.
+ 
+         :param name: string representing the name of the network profile to
+                      create. Default argument value chosen to correspond to the
+                      default name specified in config.py file.
++        :param segment_range: string representing the segment range for network
++                              profile.
+         """
+         db_session = db.get_session()
+         profile = {'name': name,
+                    'segment_type': 'vlan',
+-                   'physical_network': 'phsy1',
+-                   'segment_range': '3968-4047'}
+-        self.network_vlan_ranges = {profile[
+-            'physical_network']: [(3968, 4047)]}
+-        n1kv_db_v2.sync_vlan_allocations(db_session, self.network_vlan_ranges)
+-        return n1kv_db_v2.create_network_profile(db_session, profile)
++                   'physical_network': PHYS_NET,
++                   'tenant_id': self.tenant_id,
++                   'segment_range': segment_range}
++        net_p = n1kv_db_v2.create_network_profile(db_session, profile)
++        n1kv_db_v2.sync_vlan_allocations(db_session, net_p)
++        return net_p
+ 
+     def setUp(self):
+         """
+@@ -244,8 +254,8 @@ class TestN1kvNetworkProfiles(N1kvPluginTestCase):
+                                     'segment_type': segment_type,
+                                     'tenant_id': self.tenant_id}}
+         if segment_type == 'vlan':
+-            netp['network_profile']['segment_range'] = '100-180'
+-            netp['network_profile']['physical_network'] = 'phys1'
++            netp['network_profile']['segment_range'] = '100-110'
++            netp['network_profile']['physical_network'] = PHYS_NET
+         elif segment_type == 'overlay':
+             netp['network_profile']['segment_range'] = '10000-10010'
+             netp['network_profile']['sub_type'] = 'enhanced' or 'native_vxlan'
+@@ -253,15 +263,40 @@ class TestN1kvNetworkProfiles(N1kvPluginTestCase):
+                                                              "224.1.1.10")
+         return netp
+ 
+-    def test_create_network_profile_plugin(self):
++    def test_create_network_profile_vlan(self):
+         data = self._prepare_net_profile_data('vlan')
+         net_p_req = self.new_create_request('network_profiles', data)
+         res = net_p_req.get_response(self.ext_api)
+         self.assertEqual(res.status_int, 201)
+ 
++    def test_create_network_profile_overlay(self):
++        data = self._prepare_net_profile_data('overlay')
++        net_p_req = self.new_create_request('network_profiles', data)
++        res = net_p_req.get_response(self.ext_api)
++        self.assertEqual(res.status_int, 201)
++
++    def test_create_network_profile_overlay_unreasonable_seg_range(self):
++        data = self._prepare_net_profile_data('overlay')
++        data['network_profile']['segment_range'] = '10000-100000000001'
++        net_p_req = self.new_create_request('network_profiles', data)
++        res = net_p_req.get_response(self.ext_api)
++        self.assertEqual(res.status_int, 400)
++
++    def test_update_network_profile_plugin(self):
++        net_p_dict = self._prepare_net_profile_data('overlay')
++        net_p_req = self.new_create_request('network_profiles', net_p_dict)
++        net_p = self.deserialize(self.fmt,
++                                 net_p_req.get_response(self.ext_api))
++        data = {'network_profile': {'name': 'netp2'}}
++        update_req = self.new_update_request('network_profiles',
++                                             data,
++                                             net_p['network_profile']['id'])
++        update_res = update_req.get_response(self.ext_api)
++        self.assertEqual(update_res.status_int, 200)
++
+     def test_update_network_profile_physical_network_fail(self):
+         net_p = self._make_test_profile(name='netp1')
+-        data = {'network_profile': {'physical_network': 'some-phys-net'}}
++        data = {'network_profile': {'physical_network': PHYS_NET}}
+         net_p_req = self.new_update_request('network_profiles',
+                                             data,
+                                             net_p['id'])
+@@ -343,6 +378,47 @@ class TestN1kvNetworkProfiles(N1kvPluginTestCase):
+         res = net_p_req.get_response(self.ext_api)
+         self.assertEqual(res.status_int, 201)
+ 
++    def test_create_network_profile_populate_vlan_segment_pool(self):
++        db_session = db.get_session()
++        net_p_dict = self._prepare_net_profile_data('vlan')
++        net_p_req = self.new_create_request('network_profiles', net_p_dict)
++        self.deserialize(self.fmt,
++                         net_p_req.get_response(self.ext_api))
++        for vlan in range(VLAN_MIN, VLAN_MAX + 1):
++            self.assertIsNotNone(n1kv_db_v2.get_vlan_allocation(db_session,
++                                                                PHYS_NET,
++                                                                vlan))
++            self.assertFalse(n1kv_db_v2.get_vlan_allocation(db_session,
++                                                            PHYS_NET,
++                                                            vlan).allocated)
++        self.assertRaises(c_exc.VlanIDNotFound,
++                          n1kv_db_v2.get_vlan_allocation,
++                          db_session,
++                          PHYS_NET,
++                          VLAN_MIN - 1)
++        self.assertRaises(c_exc.VlanIDNotFound,
++                          n1kv_db_v2.get_vlan_allocation,
++                          db_session,
++                          PHYS_NET,
++                          VLAN_MAX + 1)
++
++    def test_delete_network_profile_deallocate_vlan_segment_pool(self):
++        db_session = db.get_session()
++        net_p_dict = self._prepare_net_profile_data('vlan')
++        net_p_req = self.new_create_request('network_profiles', net_p_dict)
++        net_p = self.deserialize(self.fmt,
++                                 net_p_req.get_response(self.ext_api))
++        self.assertIsNotNone(n1kv_db_v2.get_vlan_allocation(db_session,
++                                                            PHYS_NET,
++                                                            VLAN_MIN))
++        self._delete('network_profiles', net_p['network_profile']['id'])
++        for vlan in range(VLAN_MIN, VLAN_MAX + 1):
++            self.assertRaises(c_exc.VlanIDNotFound,
++                              n1kv_db_v2.get_vlan_allocation,
++                              db_session,
++                              PHYS_NET,
++                              vlan)
++
+ 
+ class TestN1kvBasicGet(test_plugin.TestBasicGet,
+                        N1kvPluginTestCase):

@@ -1,0 +1,10 @@
+# start the hosts
+for h in control compute1 compute2; do virsh start $h; done
+
+# start devstack
+for ip in 192.168.0.225 192.168.0.115 192.168.0.116; do ssh r@$ip "bash --login -c 'cd devstack; restack'"; done
+
+# examine neutron agents' status
+ssh r@192.168.0.225 "bash --login -c 'cd devstack; source openrc admin demo; neutron agent-list'"
+
+

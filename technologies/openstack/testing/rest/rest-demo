@@ -1,0 +1,44 @@
+# A piece of demo bash code for testing neutron RESTful API.
+# How does it work in bash command line prompt?
+# 1. If your openstack is installed in virtual env, activate it first.
+# 2. Have admin credential exported to environment by source keystone_admin,
+#    which is largely equivalent to 'source ~/devstack/openrc admin admin'.
+# 3. Source this program in bash.
+# 4. Execute these commands:
+#    qq extensions | jsonlint -f
+#    qq extensions/security-group | jsonlint -f
+#    qq extensions/security-group-source-port | jsonlint -f
+
+export service_host=192.168.0.225
+
+function get_q_url_root {
+  local q_service_host=$service_host
+  local q_service_port=9696
+  local q_service_version="v2.0"
+  echo "http://$q_service_host:$q_service_port/$q_service_version"
+}
+
+function get_auth_token {
+  if [ -z $_OS_AUTH_TOKEN ]; then
+    export _OS_AUTH_TOKEN=$(keystone token-get | awk '/id/{print $4}' | \
+      head -n1)
+  fi
+  echo $_OS_AUTH_TOKEN
+}
+
+# function for Qeurying Quantum(Neutron) RESTful API interface
+function qq {
+  local query_str=$1
+  local token=$(get_auth_token)
+  local q_url_root=$(get_q_url_root)
+  if [ -z "$token" ]; then
+    echo "#Error: failed to get auth token"
+    return
+  elif [ -z "$q_url_root" ]; then
+    echo "#Error: failed to get neutron url root"
+    return
+  fi
+  local header="X-Auth-Token: $token"
+  curl -X GET -H "$header" "$q_url_root/$query_str"
+}
+

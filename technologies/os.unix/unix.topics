@@ -1,0 +1,27 @@
+
+Various unix-related os topics created @ 20120329
+
+1. Buffer vs. Cache (20120329)
+
+This topic arises while reading Bach's The Design of the Unix Operating System,
+chapter 3 THE BUFFER CACHE.
+
+The two are not mutually exclusive, but they do have different emphasis.
+
+A buffer is a temporary memory location that is used as an intermediate stage.
+It is originally used in occasions when CPU cannot directly address data stored
+in peripheral devices. It is also feasible when a large block of data is
+assembled or disassembled (as in the case of data transferring involving storage
+device or network), or when data to be written can be accumulated to some max.
+amount and written (flushed) once for all.
+
+A cache is used based on the fundamental observation that same datum will be
+accessed multiple times. If data transfer is expensive, by keeping previously
+fetched datum in high speed memory (as cache) for (repeated) later use,
+performance is improved.
+
+Now back to the topic. The two terms are used together in the book.
+
+Ref:
+http://en.wikipedia.org/wiki/Cache_%28computing%29#The_difference_between_buffer_and_cache
+

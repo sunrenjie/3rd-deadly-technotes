@@ -1,0 +1,77 @@
+
+// Understanding JOS <inc/queue.h> and derivative data structures @ 20130619
+
+/////////////////////////////////////////////////////////////////////////
+// Code excerpt from <inc/queue.h>
+/////////////////////////////////////////////////////////////////////////
+
+#define	LIST_INIT(head) do {						\
+	LIST_FIRST((head)) = NULL;					\
+} while (0)
+#define LIST_HEAD(name, type)                                           \
+struct name {                                                           \
+        struct type *lh_first;  /* first element */                     \
+}
+#define LIST_ENTRY(type)                                                \
+struct {                                                                \
+        struct type *le_next;   /* next element */                      \
+        struct type **le_prev;  /* ptr to ptr to this element */        \
+}
+
+/*
+ * Return the first element in the list named "head".
+ */
+#define	LIST_FIRST(head)	((head)->lh_first)
+
+/*
+ * Return the element after "elm" in the list.
+ * The "field" name is the link element as above.
+ */
+#define	LIST_NEXT(elm, field)	((elm)->field.le_next)
+
+/*
+ * Insert the element "elm" at the head of the list named "head".
+ * The "field" name is the link element as above.
+ */
+#define	LIST_INSERT_HEAD(head, elm, field) do {				\
+	if ((LIST_NEXT((elm), field) = LIST_FIRST((head))) != NULL)	\
+		LIST_FIRST((head))->field.le_prev = &LIST_NEXT((elm), field);\
+	LIST_FIRST((head)) = (elm);					\
+	(elm)->field.le_prev = &LIST_FIRST((head));			\
+} while (0)
+
+/////////////////////////////////////////////////////////////////////////
+// Processed code
+/////////////////////////////////////////////////////////////////////////
+
+LIST_HEAD(Page_list, Page); /*
+struct Page_list {
+        struct Page *lh_first;
+};
+*/
+typedef LIST_ENTRY(Page) Page_LIST_entry_t; /*
+typedef struct {
+        struct Page *le_next;
+        struct Page **le_prev;
+} Page_LIST_entry_t;
+*/
+
+struct Page {
+        Page_LIST_entry_t pp_link; /*
+struct {
+        struct Page *le_next;
+        struct Page **le_prev;
+} pp_link;
+*/
+        uint16_t pp_ref;
+};
+
+	LIST_INIT(&page_free_list); /*
+do {
+	(&page_free_list)->lh_first = NULL;
+} while (0);
+*/
+	for (i = 0; i < npage; i++) {
+		pages[i].pp_ref = 0;
+		LIST_INSERT_HEAD(&page_free_list, &pages[i], pp_link);
+	}

@@ -1,0 +1,20 @@
+devstack
+
+$ cat /usr/bin/nova
+#!/usr/bin/python
+# PBR Generated from u'console_scripts'
+
+import sys
+
+from novaclient.shell import main
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+$ cat /usr/lib/python2.7/site-packages/nova.egg-link
+/opt/stack/nova
+.
+
+/opt/stack/python-neutronclient/python_neutronclient.egg-info/
+

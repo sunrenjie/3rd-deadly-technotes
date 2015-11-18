@@ -1,0 +1,31 @@
+
+Full installation guide
+
+1. Copy the template to path of the hard disk image of the VM.
+2. Boot VM.
+3. Preliminary configurations: installation of 2nd nic, setting of host name,
+   installation of ssh keys (for password-less authtication), installation of
+   bashrc-local(-sudo) which will do a lot of other configuration tasks
+   and install notes repo.
+4. Install devstack.
+5. Post-installation configurations: install config files for br-ex and 1st
+   nic.
+
+
+======================
+Questions and Problems
+
+1. Possible reasons that VMs cannot be accessed from another VM or host node:
+   + MTU may need to be set to a value below of 1500 (e.g., 1450). Solution:
+     set it lower via command line (or is there more automatic method?).
+   + Fedora sshd configuration has password authentication disabled by
+     default. Solution: modify sshd_config and restart the ssd service.
+
+2. Updates in devstack repo make our existing installation methods less
+   inefficient.
+
+3. The various post-installation openstack-specific functions need update.
+
+4. When we want to access VM via floating ip, we essentially need to execute
+   'ip nei del' again and again.
+

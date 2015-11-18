@@ -1,0 +1,129 @@
+
+20120316
+
+Trying to analyze, understand, and modify the ubuntu utouch-grail module.
+wordir = /t/a/incoming/ubuntu-src-release-11.10/utouch-grail-2.0.1
+
+From 20120315_ubuntu.utouch (with modifications):
+
+Q2. How should we understand open source code and make changes as needed without
+spending too much time on irrelevent info?
+
+I think we should try to understand the way the software is written as much as
+possible within limited time. Layers considered:
++ The GNU compiling system
++ The debian/ubuntu compiling system
++ The launchpad, on which the code is hosted
+  + Detailed revision history
++ Any documentation
++ The code itself
+
+It's obvious from https://lists.launchpad.net/multi-touch-dev/msg00960.html:
+'utouch-frame 2.x, utouch-grail 3.x, and utouch-geis 2.2.4' shall work together,
+representing the latest technologies.
+(Though we have trouble compiling utouch-geis-2.2.6.)
+
+The software stack released with ubuntu 11.10 is:
+utouch-frame-1.1.4 utouch-grail-2.0.1 and utouch-geis-2.1.2.
+
+It is surprising to learn that shared library dependency info (from ldd) does
+not reveal that libutouch-geis1 actually depends on libutouch-grail1:
+$ ldd /usr/lib/libutouch-geis.so.1.2.0
+	linux-vdso.so.1 =>  (0x00007fffca3c0000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f5426838000)
+	libX11-xcb.so.1 => /usr/lib/x86_64-linux-gnu/libX11-xcb.so.1 (0x00007f5426636000)
+	libX11.so.6 => /usr/lib/x86_64-linux-gnu/libX11.so.6 (0x00007f54262fd000)
+	libXi.so.6 => /usr/lib/x86_64-linux-gnu/libXi.so.6 (0x00007f54260ed000)
+	libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f5425ee9000)
+	libdbus-1.so.3 => /lib/x86_64-linux-gnu/libdbus-1.so.3 (0x00007f5425ca5000)
+	libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x00007f5425a88000)
+	libxcb.so.1 => /usr/lib/x86_64-linux-gnu/libxcb.so.1 (0x00007f542586c000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f54254cc000)
+	libXext.so.6 => /usr/lib/x86_64-linux-gnu/libXext.so.6 (0x00007f54252b9000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f5426cf6000)
+	librt.so.1 => /lib/x86_64-linux-gnu/librt.so.1 (0x00007f54250b1000)
+	libXau.so.6 => /usr/lib/x86_64-linux-gnu/libXau.so.6 (0x00007f5424ead000)
+	libXdmcp.so.6 => /usr/lib/x86_64-linux-gnu/libXdmcp.so.6 (0x00007f5424ca7000)
+
+I think we shall mv /usr/lib/libutouch-grail.so.1.1.0 and run test program to
+see how the stack would fail.
+Test result: the X Windows starts with all input devices disabled, with the
+following in /var/log/Xorg.0.log:
+[    64.245] (II) config/udev: Adding input device Dell Dell USB Optical Mouse (/dev/input/mouse0)
+[    64.245] (II) No input driver/identifier specified (ignoring)
+[    64.245] (II) config/udev: Adding input device Dell Dell USB Optical Mouse (/dev/input/event2)
+[    64.245] (**) Dell Dell USB Optical Mouse: Applying InputClass "evdev pointer catchall"
+[    64.245] (II) LoadModule: "evdev"
+[    64.245] (II) Loading /usr/lib/xorg/modules/input/evdev_drv.so
+[    64.245] (EE) Failed to load /usr/lib/xorg/modules/input/evdev_drv.so: libutouch-grail.so.1: cannot open shared object file: No such file or directory
+[    64.245] (EE) LoadModule: Module evdev does not have a evdevModuleData data object.
+[    64.245] (II) UnloadModule: "evdev"
+[    64.245] (II) Unloading evdev
+[    64.245] (EE) Failed to load module "evdev" (invalid module, 0)
+[    64.245] (EE) No input driver matching `evdev'
+
+It turns out that Xorg, or precisely, its input module xserver-xorg-input-evdev
+(/usr/lib/xorg/modules/input/evdev_drv.so) is dependent on grail to recognize
+and the gestures. Client programs will generally use touch-geis module to
+subscribe to the gesture signals.
+Information from 'dpkg -p libutouch-grail1' tells us that 
+'xserver-xorg-input-gevdev' is dependent on it. It might be
+'xserver-xorg-input-evdev' instead.
+
+$ ldd /usr/lib/xorg/modules/input/evdev_drv.so
+	linux-vdso.so.1 =>  (0x00007fffbbfff000)
+	libutouch-grail.so.1 => /usr/lib/libutouch-grail.so.1 (0x00007fa1a373f000)
+	libmtdev.so.1 => /usr/lib/libmtdev.so.1 (0x00007fa1a3539000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fa1a3199000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fa1a2f15000)
+	libutouch-evemu.so.1 => /usr/lib/libutouch-evemu.so.1 (0x00007fa1a2d11000)
+	libutouch-frame.so.1 => /usr/lib/libutouch-frame.so.1 (0x00007fa1a2b0b000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007fa1a3b73000)
+	libX11.so.6 => /usr/lib/x86_64-linux-gnu/libX11.so.6 (0x00007fa1a27d3000)
+	libXi.so.6 => /usr/lib/x86_64-linux-gnu/libXi.so.6 (0x00007fa1a25c3000)
+	libxcb.so.1 => /usr/lib/x86_64-linux-gnu/libxcb.so.1 (0x00007fa1a23a6000)
+	libdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007fa1a21a2000)
+	libXext.so.6 => /usr/lib/x86_64-linux-gnu/libXext.so.6 (0x00007fa1a1f8f000)
+	libXau.so.6 => /usr/lib/x86_64-linux-gnu/libXau.so.6 (0x00007fa1a1d8b000)
+	libXdmcp.so.6 => /usr/lib/x86_64-linux-gnu/libXdmcp.so.6 (0x00007fa1a1b85000)
+
+Functions exported by grail and used by evdev can be trivially determined:
+$ nm -D /usr/lib/xorg/modules/input/evdev_drv.so | grep '^[ \t]*U' | grep grail
+                 U grail_close
+                 U grail_mask_get_first
+                 U grail_mask_get_next
+                 U grail_open
+                 U grail_pull
+                 U grail_set_bbox
+
+Dependency of evdev on mtdev is detailed by:
+$ nm -D /usr/lib/xorg/modules/input/evdev_drv.so | grep '^[ \t]*U' | grep mtdev
+                 U mtdev_close
+                 U mtdev_open
+
+Other dependencies of evdev on utouch stack are via grail as detailed by:
+$ nm -D /usr/lib/libutouch-grail.so.1 | grep evemu
+                 U evemu_delete
+                 U evemu_extract
+                 U evemu_new
+                 U evemu_read
+                 U evemu_read_event_realtime
+$ nm -D /usr/lib/libutouch-grail.so.1 | grep frame
+00000000000041b0 T grail_get_contact_frame
+0000000000004cb0 T grail_pump_frame
+                 U utouch_frame_delete_engine
+                 U utouch_frame_get_num_slots
+                 U utouch_frame_get_surface
+                 U utouch_frame_init_mtdev
+                 U utouch_frame_is_supported_mtdev
+                 U utouch_frame_new_engine_raw
+                 U utouch_frame_pump_mtdev
+$ nm -D /usr/lib/libutouch-grail.so.1 | grep mtdev
+                 U mtdev_close_delete
+                 U mtdev_get
+                 U mtdev_idle
+                 U mtdev_new_open
+                 U utouch_frame_init_mtdev
+                 U utouch_frame_is_supported_mtdev
+                 U utouch_frame_pump_mtdev
+

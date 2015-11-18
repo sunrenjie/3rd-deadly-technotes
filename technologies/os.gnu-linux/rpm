@@ -1,0 +1,4 @@
+rpm -i package.rpm
+rpm -qf /path/to/file
+rpm -qf /path/to/file --queryformat='%{NAME}.%{ARCH}\n'
+rpm -ql package-name

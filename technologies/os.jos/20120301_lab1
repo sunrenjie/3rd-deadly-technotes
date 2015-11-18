@@ -1,0 +1,187 @@
+
+Mar 1, 2012
+
+Continuing the effort of completing 2006 lab1.
+We previously made many efforts, but none of which is systematic. We shall
+hereby enforce the SOP of verbose logging.
+
+------------------------------------------------------------------------------
+Exercice 6. Reset the machine (exit bochs and start it again). Examine the 8
+words of memory at 0x00100000 at the point the BIOS enters the boot loader,
+and then again at the point the boot loader enters the kernel. Why are they
+different? What is there at the second breakpoint? (You do not really need
+to use Bochs to answer this question. Just think.)
+
+Answer:
+When the BIOS enters the boot loader, the words at 0x100000 area are all
+zeroes since they are uninitialized. When the kernel is to be entered,
+the 8 words are:
+0xb002	0x1bad	0x0003	0x0000	0x4ffb	0xe452	0xc766	0x7205 .
+Since the kernel is compiled at this address, the contents are machine code
+for the first few instructions from entry.S:
+        movw    $0x1234,0x472                   # warm boot
+        ...
+------------------------------------------------------------------------------
+Exercise 10. Determine where the kernel initializes its stack, and exactly
+where in memory its stack is located. How does the kernel reserve space for
+its stack? And at which "end" of this reserved area is the stack pointer
+initialized to point to?
+
+Answer:
+The kernel is initialized in kern/entry.S via '.space' instruction:
+
+ 61         movl    $0x0,%ebp                       # nuke frame pointer
+ 62 
+ 63         # Set the stack pointer
+ 64         movl    $(bootstacktop),%esp
+...
+ 87         .globl          bootstack
+ 88 bootstack:
+ 89         .space          KSTKSIZE
+ 90         .globl          bootstacktop
+ 91 bootstacktop:
+
+In inc/memlayout.h:
+ 96 #define KSTKSIZE        (8*PGSIZE)              // size of a kernel stack
+
+According to obj/kernel.asm, the stack area is between bootstack (0xf0107000)
+and bootstacktop (f010f000), a total of 0x8000 bytes.
+
+The stack pointer, esp, points to the 'higher end' of this reserved area. The
+stack grows downward into lower address.
+
+Tracing-related topics see ./20120301_lab1.backtrace
+
+Question: Why can't the backtrace code detect how many arguments there
+actually are? How could this limitation be fixed?
+
+Answer:
+In addition to arguments, there may be other data pushed onto the stack, such
+information is not available from the stack itself. The best we can know is
+that the argument list will not go past the memory for the next ebp. We could
+fix this limitation if the backtrace code knows the function prototypes and
+hence the number of arguments. Yet when the argument list is variable in
+length, as in the case of printf, we'll fail again. Such info is not available
+to the caller.
+
+Now we shall work on displaying function name in backtrace.
+Done. See ./20120301_lab1.backtrace.
+
+[20141215]
+[course material 2014] Exercise 5. Trace through the first few instructions of
+the boot loader again and identify the first instruction that would "break" or
+otherwise do the wrong thing if you were to get the boot loader's link address
+wrong. Then change the link address in boot/Makefrag to something wrong, run
+make clean, recompile the lab with make, and trace into the boot loader again
+to see what happens. Don't forget to change the link address back and make
+clean again afterward!
+
+Answer:
+Short version: ljmp    $PROT_MODE_CSEG, $protcseg
+Long version: the only candidates are long jump instructions; hence the first
+ljmp will break. The BIOS will 'blindly' put the bootsect at 0x7c00 and jump
+to it. The specifying of linker address via option '-Ttext 0x7C00' effectively
+determines the memory addresses. Specifying invalid addresses means that the
+'lgdt gdtdesc' instruction will get the wrong address for gdtdesc. But the
+execution does not explode until the gdt descriptor loading actually takes
+place later. Other jmp instructions are not affected since they are relative.
+
+[course material 2014] Exercise 7. Use QEMU and GDB to trace into the JOS
+kernel and stop at the movl %eax, %cr0. Examine memory at 0x00100000 and at
+0xf0100000. Now, single step over that instruction using the stepi GDB command.
+Again, examine memory at 0x00100000 and at 0xf0100000. Make sure you understand
+what just happened.
+
+What is the first instruction after the new mapping is established that would
+fail to work properly if the mapping weren't in place? Comment out the movl
+%eax, %cr0 in kern/entry.S, trace into it, and see if you were right.
+
+Answer:
+Short version: jmp     *%eax
+Longer version: Now that paging is not enabled, the virtual addresses starting
+at KERNBASE are invalid. Therefore, the first code referencing them will fail.
+
+[20141218 - 20141220]
+
+==========================
+Questions after Exercise 9
+
+[I] Explain the interface between printf.c and console.c. Specifically, what
+function does console.c export? How is this function used by printf.c?
+
+[Answer] The interface function is cputchar(), which is used by console.c to
+implement putch().
+
+[II] Explain the following from console.c:
+1      if (crt_pos >= CRT_SIZE) {
+2              int i;
+3              memcpy(crt_buf, crt_buf + CRT_COLS, (CRT_SIZE - CRT_COLS) * sizeof(uint16_t));
+4              for (i = CRT_SIZE - CRT_COLS; i < CRT_SIZE; i++)
+5                      crt_buf[i] = 0x0700 | ' ';
+6              crt_pos -= CRT_COLS;
+7      }
+
+[Answer] The main logic is that, when the screen is full, the content gets
+'scrolled' (actually copied) up by one line, leaving the bottom line empty
+content with default white-text-on-black-ground color scheme.
+
+[III] For the following questions you might wish to consult the notes for
+Lecture 2. These notes cover GCC's calling convention on the x86.
+
+Trace the execution of the following code step-by-step:
+
+int x = 1, y = 3, z = 4;
+cprintf("x %d, y %x, z %d\n", x, y, z);
+
+First, in the call to cprintf(), to what does fmt point? To what does ap point?
+Second, list (in order of execution) each call to cons_putc, va_arg, and
+vcprintf. For cons_putc, list its argument as well. For va_arg, list what ap
+points to before and after the call. For vcprintf list the values of its two
+arguments.
+
+[Answer] In call to cprintf(), fmt will point to the string
+"x %d, y %x, z %d\n", ap will point to address of x. The order of the relevant
+function calls are:
+vcprintf(fmt="x %d, y %x, z %d\n", ap=&x)
+cons_putc(c='x')
+cons_putc(c=' ')
+va_arg(ap=&x, type=int) [after the call, ap=&y; return x=1]
+cons_putc(c='1')
+cons_putc(c=',')
+cons_putc(c='y')
+cons_putc(c=' ')
+va_arg(ap=&y, type=int) [after the call, ap=&z; return y=2]
+cons_putc(c='2')
+cons_putc(c=',')
+cons_putc(c='z')
+cons_putc(c=' ')
+va_arg(ap=&z, type=int) [after the call, ap=return z=3]
+cons_putc(c='3')
+cons_putc(c='\n')
+
+[IV] Run the following code.
+    unsigned int i = 0x00646c72;
+    cprintf("H%x Wo%s", 57616, &i);
+What is the output? Explain how this output is arrived out in the step-by-step
+manner of the previous exercise.
+The output depends on that fact that the x86 is little-endian. If the x86 were
+instead big-endian what would you set i to in order to yield the same output?
+Would you need to change 57616 to a different value?
+
+[Answer] The output will be 'He110 World'. If x86 is big-endian, i shall be
+assigned as 0x726c6400.
+
+[V] In the following code, what is going to be printed after 'y='? (note: the
+answer is not a specific value.) Why does this happen?
+    cprintf("x=%d y=%d", 3);
+
+[Answer] Whatever outcome as generated by interpreting the dword on the stack
+top as int before this clause is executed.
+
+[VI] Let's say that GCC changed its calling convention so that it pushed
+arguments on the stack in declaration order, so that the last argument is
+pushed last. How would you have to change cprintf or its interface so that it
+would still be possible to pass it a variable number of arguments?
+
+[Answer] We'd have to change cprintf or its interface so that all arguments
+are reversed in order.

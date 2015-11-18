@@ -1,0 +1,13 @@
+Questions, Notes
++ Tests are good examples of using code functionalities.
++ How is tested performed by testr?
++ How to manually run some tests so that we could examine data structures
+  and/or debug them.
++ There are configurations and other stuff that should be considered in order
+  to do so.
++ When armed with better knowledges, tools, ideas, we should come back to
+  analyze some changes more deeply:
+  + Id4dff993
+    + NeutronManager.get_plugin()
+    + server.capabilities()
+    + mock.patch()

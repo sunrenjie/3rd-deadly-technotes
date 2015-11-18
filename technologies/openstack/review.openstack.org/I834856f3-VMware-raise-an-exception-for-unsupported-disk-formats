@@ -1,0 +1,56 @@
+Change I834856f3: VMware: raise an exception for unsupported disk formats
+
+Commit message:
+VMware: raise an exception for unsupported disk formats
+
+At the moment 'vmdk' and 'iso' are the only disk formats supported.
+If an invalid format is passed with the image then the driver will
+throw and exception.
+
+Change-Id: I834856f33a0644bc03b89a2b98e4e188c112e338
+Closes-bug: #1287844
+
+Comments:
+1. This change improves a TODO in an obvious way. The original code
+   features a if-else between 'vmdk' and 'iso', two of the disk image formats
+   supported by vmware.
+2. I could not understand why the author of the TODO left bad code in the first
+   place.
+
+diff --git a/nova/virt/vmwareapi/vmops.py b/nova/virt/vmwareapi/vmops.py
+index d36e170..9304d45 100644 (file)
+--- a/nova/virt/vmwareapi/vmops.py
++++ b/nova/virt/vmwareapi/vmops.py
+@@ -183,6 +183,12 @@ class VMwareVMOps(object):
+         path = "%s/%s.vmdk" % (folder, name)
+         return ds_util.build_datastore_path(ds_name, path)
+ 
++    def _get_disk_format(self, image_meta):
++        disk_format = image_meta.get('disk_format')
++        if disk_format not in ['iso', 'vmdk']:
++            raise exception.InvalidDiskFormat(disk_format=disk_format)
++        return (disk_format, disk_format == 'iso')
++
+     def spawn(self, context, instance, image_meta, injected_files,
+               admin_password, network_info, block_device_info=None,
+               instance_name=None, power_on=True):
+@@ -214,10 +220,7 @@ class VMwareVMOps(object):
+             if block_device_mapping:
+                 ebs_root = True
+ 
+-        # Get the file_type from the disk format
+-        # TODO(garyk): raise an error if disk format is not supported
+-        is_iso = image_meta.get('disk_format') == 'iso'
+-        file_type = 'iso' if is_iso else 'vmdk'
++        (file_type, is_iso) = self._get_disk_format(image_meta)
+ 
+         client_factory = self._session._get_vim().client.factory
+         service_content = self._session._get_vim().get_service_content()
+
+Comments:
+1. According to diff of patch sets, apparently the author did not get the
+   changes right in the first place. The original exception raised was
+   exception.Invalid which then changed to exception.InvalidDiskFormat, after
+   being pointed out by a reviewer. The author even naively created a msg for
+   use with exception.Invalid.
+

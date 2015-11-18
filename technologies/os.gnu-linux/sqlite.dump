@@ -1,0 +1,18 @@
+
+# dump all tables from a sqlite database; 20120612
+dbfile=Human_CHR1.sqlite
+{ sqlite3 "$dbfile" <<!
+.tables
+!
+} | while read l; do
+  tables=($l) # per line
+  for t in ${tables[@]}; do
+    echo table: $t
+    sqlite3 "$dbfile" <<!
+.headers on
+.mode csv
+.output "$dbfile.$t"
+select * from $t;
+!
+  done
+done

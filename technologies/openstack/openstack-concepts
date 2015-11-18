@@ -1,0 +1,22 @@
+
+Users, tenants (previously known as projects), and roles
+
+A user is an entity that can be a person, system, or service.
+
+A tenant is a user group. A system typically have at least the tenants admin and
+services. Based on the accessible services and/or identy objects, a tenant is
+usually defined to contain some types of users. We may create an 'admin' tenant
+to contain the user 'admin', an 'services' tenent to contain the openstack
+services glance, nova, neutron, etc. A role is an personality that a user
+assumes that enables them to perform a specific set of operations. A user may
+have more than one roles.
+
+Users always log in with a tenant, and roles are assigned to users within tenants.
+
+Implementation details:
++ For my installation of openstack 2013.2.2, all users have to have the role
+  '_member_' in order to be able to access dashboard (confirmed by doc).
++ The term 'project' is deprecated in favor of 'tenant', yet it still prevails
+  in existing doc and even code:
+  nova/api/openstack/wsgi.py:983: msg = _("Malformed request URL: URL's project_id '%(project_id)s'"
+

@@ -1,0 +1,63 @@
+Change Icfc69824: Replace a usage of the deprecated root_helper option
+
+https://review.openstack.org/#/c/82746/
+
+Replace a usage of the deprecated root_helper option
+
+This change replaces a usage of the deprecated root_helper option
+by the usage of get_root_helper result.
+
+Change-Id: Icfc698243784557cbf987a817c13d0b80969e5d3
+Closes-Bug: #1297145
+
+Bug Description
+
+L3 agent uses deprecated root_helper option through self.conf.root_helper in
+neutron.agent.l3_agent.L3NATAgent._update_routing_table instead of using
+self.root_helper (result of neutron.agent.common.config.get_root_helper.
+
+It implies if AGENT/root_helper option is configured and root_helper is not
+configured, extra routes are not pushed in routers.
+
+Notes:
+1. This is typically a deprecation problem. An option is considered inadequate,
+   an alternative is adopted, deprecating the original one. Unfortunately, code
+   relying on this feature does not get updated. In this particular case, the
+   problem has been spotted the harder way. Someone accidentally found that
+   routing table updating won't work as expected. Then some tracking identified
+   this problem as a bug.
+2. [context] Configuration files are read by oslo.config into cfg.CONF, from
+   which wrapper functions can then be used to extract particular config info.
+   The config in this case is root_helper, provider of sudo (and possibly more)
+   functionality. Previously, it is at the DEFAULT section in neutron.conf.
+   Later someone else decided to move it to agent section and provide
+   get_root_helper() for accessing this config. This change recognizes
+   root_helper in DEFAULT section as compatibility. Yet the code in
+   _update_routing_table() still access the cfg.CONF directly. Now that by
+   default the configuration file does not have root_helper in agent section,
+   this function will not be able to get sudo and do its work (updating the
+   routine table).
+3. [summary] This is a bug introduced by a previous change that failed to
+   update affected code as well. It is hard to imagine that there is only one
+   affected piece of code, yet this one just failed to attract attention when
+   that previous change was made.
+3. This is one of the changes that make little change in code, yet is related
+   to a much larger problem.
+
+DIFF:
+diff --git a/neutron/agent/l3_agent.py b/neutron/agent/l3_agent.py
+index 27fa5fa..aed9bd0 100644 (file)
+--- a/neutron/agent/l3_agent.py
++++ b/neutron/agent/l3_agent.py
+@@ -861,7 +861,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback, manager.Manager):
+     def _update_routing_table(self, ri, operation, route):
+         cmd = ['ip', 'route', operation, 'to', route['destination'],
+                'via', route['nexthop']]
+-        ip_wrapper = ip_lib.IPWrapper(self.conf.root_helper,
++        ip_wrapper = ip_lib.IPWrapper(self.root_helper,
+                                       namespace=ri.ns_name())
+         ip_wrapper.netns.execute(cmd, check_exit_code=False)
+Note:
+1. self.conf is assigned cfg.CONF in __init__(), references the config tree,
+   while self.root_helper is initialized in __init__() as the return value of
+   get_root_helper(), the selector defined for the feature root_helper.

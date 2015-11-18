@@ -1,0 +1,148 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>20140710-I0d8b83e0-Implement-namespace-cleanup-for-new-DVR-namespaces.html</title>
+<meta name="Generator" content="Vim/7.3">
+<meta name="plugin-version" content="vim7.3_v10">
+<meta name="syntax" content="git">
+<meta name="settings" content="number_lines,use_css,pre_wrap,expand_tabs">
+<style type="text/css">
+<!--
+pre { font-family: monospace; color: #000000; background-color: #ffffff; }
+body { font-family: monospace; color: #000000; background-color: #ffffff; }
+.lnr { color: #af5f00; }
+.PreProc { color: #c000c0; }
+.Type { color: #008000; }
+.Special { color: #c000c0; }
+.Constant { color: #c00000; }
+.Identifier { color: #008080; }
+.Statement { color: #af5f00; }
+-->
+</style>
+</head>
+<body>
+<h1>Notes</h1>
+<pre>
+This change is quite straightforward: new namespace type is introduced, the
+code that list and cleanup the namespaces shall be modified to know about that.
+In addition, metadata_proxy processes, unlike radvd, are specific to qrouter
+namespaces; to reflect that, test code is modified to treat them differently.
+
+</pre>
+<hr>
+<pre>
+<span class="lnr">  1 </span><span class="Statement">commit</span> <span class="Identifier">163e8edc29646110490831b4590f3464703e6a1a</span>
+<span class="lnr">  2 </span><span class="Statement">Author:</span> <span class="Constant">Carl Baldwin </span><span class="Special">&lt;</span><span class="Special">carl.baldwin@hp.com</span><span class="Special">&gt;</span>
+<span class="lnr">  3 </span><span class="Statement">Date:</span>   <span class="Constant">Thu Jul 10 19:41:40 2014 +0000</span>
+<span class="lnr">  4 </span>
+<span class="lnr">  5 </span>    Implement namespace cleanup for new DVR namespaces
+<span class="lnr">  6 </span>
+<span class="lnr">  7 </span>    DVR introduces a new namespace type called snat-&lt;router_id&gt;.  These
+<span class="lnr">  8 </span>    namespaces are not properly cleaned up when found stale after an agent
+<span class="lnr">  9 </span>    restart.  This patch fixes that.
+<span class="lnr"> 10 </span>
+<span class="lnr"> 11 </span>    Change-Id: I0d8b83e0b7838957742e72aa2f42b15e0ca67f04
+<span class="lnr"> 12 </span>    Partially-implements: blueprint neutron-ovs-dvr
+<span class="lnr"> 13 </span>---
+<span class="lnr"> 14 </span> neutron/agent/l3_agent.py           |    6 ++++--
+<span class="lnr"> 15 </span> neutron/tests/unit/test_l3_agent.py |   26 +++++++++++++++++++-------
+<span class="lnr"> 16 </span> 2 files changed, 23 insertions(+), 9 deletions(-)
+<span class="lnr"> 17 </span>
+<span class="lnr"> 18 </span><span class="Type">diff --git a/neutron/agent/l3_agent.py b/neutron/agent/l3_agent.py</span>
+<span class="lnr"> 19 </span>index dc308ca..b33e380 100644
+<span class="lnr"> 20 </span><span class="Type">--- a/neutron/agent/l3_agent.py</span>
+<span class="lnr"> 21 </span><span class="Type">+++ b/neutron/agent/l3_agent.py</span>
+<span class="lnr"> 22 </span><span class="Statement">@@ -468,7 +468,8 @@</span><span class="PreProc"> class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback, manager.Manager):</span>
+<span class="lnr"> 23 </span>
+<span class="lnr"> 24 </span>             host_namespaces = root_ip.get_namespaces(self.root_helper)
+<span class="lnr"> 25 </span>             return set(ns for ns in host_namespaces
+<span class="lnr"> 26 </span><span class="Special">-                       if ns.startswith(NS_PREFIX))</span>
+<span class="lnr"> 27 </span><span class="Identifier">+                       if (ns.startswith(NS_PREFIX)</span>
+<span class="lnr"> 28 </span><span class="Identifier">+                           or ns.startswith(SNAT_NS_PREFIX)))</span>
+<span class="lnr"> 29 </span>         except RuntimeError:
+<span class="lnr"> 30 </span>             LOG.exception(_('RuntimeError in obtaining router list '
+<span class="lnr"> 31 </span>                             'for namespace cleanup.'))
+<span class="lnr"> 32 </span><span class="Statement">@@ -483,6 +484,7 @@</span><span class="PreProc"> class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback, manager.Manager):</span>
+<span class="lnr"> 33 </span>         The argument router_ids is the list of ids for known routers.
+<span class="lnr"> 34 </span>         &quot;&quot;&quot;
+<span class="lnr"> 35 </span>         ns_to_ignore = set(NS_PREFIX + id for id in router_ids)
+<span class="lnr"> 36 </span><span class="Identifier">+        ns_to_ignore.update(SNAT_NS_PREFIX + id for id in router_ids)</span>
+<span class="lnr"> 37 </span>         ns_to_destroy = router_namespaces - ns_to_ignore
+<span class="lnr"> 38 </span>         self._destroy_stale_router_namespaces(ns_to_destroy)
+<span class="lnr"> 39 </span>
+<span class="lnr"> 40 </span><span class="Statement">@@ -542,7 +544,7 @@</span><span class="PreProc"> class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback, manager.Manager):</span>
+<span class="lnr"> 41 </span>                 ns_ip.del_veth(d.name)
+<span class="lnr"> 42 </span>             elif d.name.startswith(FIP_EXT_DEV_PREFIX):
+<span class="lnr"> 43 </span>                 # single port from FIP NS to br-ext
+<span class="lnr"> 44 </span><span class="Special">-                # TODO(mrsmith): remove br-ext interface</span>
+<span class="lnr"> 45 </span><span class="Identifier">+                # TODO(carl) Where does the port get deleted?</span>
+<span class="lnr"> 46 </span>                 LOG.debug('DVR: unplug: %s', d.name)
+<span class="lnr"> 47 </span>                 self.driver.unplug(d.name,
+<span class="lnr"> 48 </span>                                    bridge=self.conf.external_network_bridge,
+<span class="lnr"> 49 </span><span class="Type">diff --git a/neutron/tests/unit/test_l3_agent.py b/neutron/tests/unit/test_l3_agent.py</span>
+<span class="lnr"> 50 </span>index a1854cf..b08a690 100644
+<span class="lnr"> 51 </span><span class="Type">--- a/neutron/tests/unit/test_l3_agent.py</span>
+<span class="lnr"> 52 </span><span class="Type">+++ b/neutron/tests/unit/test_l3_agent.py</span>
+<span class="lnr"> 53 </span><span class="Statement">@@ -1691,6 +1691,8 @@</span><span class="PreProc"> class TestBasicRouterOperations(base.BaseTestCase):</span>
+<span class="lnr"> 54 </span>
+<span class="lnr"> 55 </span>         good_namespace_list = [l3_agent.NS_PREFIX + r['id']
+<span class="lnr"> 56 </span>                                for r in router_list]
+<span class="lnr"> 57 </span><span class="Identifier">+        good_namespace_list += [l3_agent.SNAT_NS_PREFIX + r['id']</span>
+<span class="lnr"> 58 </span><span class="Identifier">+                                for r in router_list]</span>
+<span class="lnr"> 59 </span>         self.mock_ip.get_namespaces.return_value = (stale_namespace_list +
+<span class="lnr"> 60 </span>                                                     good_namespace_list +
+<span class="lnr"> 61 </span>                                                     other_namespaces)
+<span class="lnr"> 62 </span><span class="Statement">@@ -1703,16 +1705,24 @@</span><span class="PreProc"> class TestBasicRouterOperations(base.BaseTestCase):</span>
+<span class="lnr"> 63 </span>         pm.reset_mock()
+<span class="lnr"> 64 </span>
+<span class="lnr"> 65 </span>         agent._destroy_router_namespace = mock.MagicMock()
+<span class="lnr"> 66 </span><span class="Identifier">+        agent._destroy_snat_namespace = mock.MagicMock()</span>
+<span class="lnr"> 67 </span>         ns_list = agent._list_namespaces()
+<span class="lnr"> 68 </span>         agent._cleanup_namespaces(ns_list, [r['id'] for r in router_list])
+<span class="lnr"> 69 </span>
+<span class="lnr"> 70 </span><span class="Special">-        # Expect process manager to disable two processes (metadata_proxy</span>
+<span class="lnr"> 71 </span><span class="Special">-        # and radvd) per stale namespace.</span>
+<span class="lnr"> 72 </span><span class="Special">-        expected_pm_disables = 2 * len(stale_namespace_list)</span>
+<span class="lnr"> 73 </span><span class="Identifier">+        # Expect process manager to disable one radvd per stale namespace</span>
+<span class="lnr"> 74 </span><span class="Identifier">+        expected_pm_disables = len(stale_namespace_list)</span>
+<span class="lnr"> 75 </span><span class="Identifier">+</span>
+<span class="lnr"> 76 </span><span class="Identifier">+        # Expect process manager to disable metadata proxy per qrouter ns</span>
+<span class="lnr"> 77 </span><span class="Identifier">+        qrouters = [n for n in stale_namespace_list</span>
+<span class="lnr"> 78 </span><span class="Identifier">+                    if n.startswith(l3_agent.NS_PREFIX)]</span>
+<span class="lnr"> 79 </span><span class="Identifier">+        expected_pm_disables += len(qrouters)</span>
+<span class="lnr"> 80 </span><span class="Identifier">+</span>
+<span class="lnr"> 81 </span>         self.assertEqual(expected_pm_disables, pm.disable.call_count)
+<span class="lnr"> 82 </span>         self.assertEqual(agent._destroy_router_namespace.call_count,
+<span class="lnr"> 83 </span><span class="Special">-                         len(stale_namespace_list))</span>
+<span class="lnr"> 84 </span><span class="Special">-        expected_args = [mock.call(ns) for ns in stale_namespace_list]</span>
+<span class="lnr"> 85 </span><span class="Identifier">+                         len(qrouters))</span>
+<span class="lnr"> 86 </span><span class="Identifier">+        self.assertEqual(agent._destroy_snat_namespace.call_count,</span>
+<span class="lnr"> 87 </span><span class="Identifier">+                         len(stale_namespace_list) - len(qrouters))</span>
+<span class="lnr"> 88 </span><span class="Identifier">+        expected_args = [mock.call(ns) for ns in qrouters]</span>
+<span class="lnr"> 89 </span>         agent._destroy_router_namespace.assert_has_calls(expected_args,
+<span class="lnr"> 90 </span>                                                          any_order=True)
+<span class="lnr"> 91 </span>         self.assertFalse(agent._clean_stale_namespaces)
+<span class="lnr"> 92 </span><span class="Statement">@@ -1720,7 +1730,8 @@</span><span class="PreProc"> class TestBasicRouterOperations(base.BaseTestCase):</span>
+<span class="lnr"> 93 </span>     def test_cleanup_namespace(self):
+<span class="lnr"> 94 </span>         self.conf.set_override('router_id', None)
+<span class="lnr"> 95 </span>         stale_namespaces = [l3_agent.NS_PREFIX + 'foo',
+<span class="lnr"> 96 </span><span class="Special">-                            l3_agent.NS_PREFIX + 'bar']</span>
+<span class="lnr"> 97 </span><span class="Identifier">+                            l3_agent.NS_PREFIX + 'bar',</span>
+<span class="lnr"> 98 </span><span class="Identifier">+                            l3_agent.SNAT_NS_PREFIX + 'foo']</span>
+<span class="lnr"> 99 </span>         other_namespaces = ['unknown']
+<span class="lnr">100 </span>
+<span class="lnr">101 </span>         self._cleanup_namespace_test(stale_namespaces,
+<span class="lnr">102 </span><span class="Statement">@@ -1730,7 +1741,8 @@</span><span class="PreProc"> class TestBasicRouterOperations(base.BaseTestCase):</span>
+<span class="lnr">103 </span>     def test_cleanup_namespace_with_registered_router_ids(self):
+<span class="lnr">104 </span>         self.conf.set_override('router_id', None)
+<span class="lnr">105 </span>         stale_namespaces = [l3_agent.NS_PREFIX + 'cccc',
+<span class="lnr">106 </span><span class="Special">-                            l3_agent.NS_PREFIX + 'eeeee']</span>
+<span class="lnr">107 </span><span class="Identifier">+                            l3_agent.NS_PREFIX + 'eeeee',</span>
+<span class="lnr">108 </span><span class="Identifier">+                            l3_agent.SNAT_NS_PREFIX + 'fffff']</span>
+<span class="lnr">109 </span>         router_list = [{'id': 'foo', 'distributed': False},
+<span class="lnr">110 </span>                        {'id': 'aaaa', 'distributed': False}]
+<span class="lnr">111 </span>         other_namespaces = ['qdhcp-aabbcc', 'unknown']
+</pre>
+</body>
+</html>

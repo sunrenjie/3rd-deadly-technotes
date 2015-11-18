@@ -1,0 +1,112 @@
+
+Mar 5, 2012
+
+Question 1. Assuming that the following JOS kernel code compiles correctly and
+doesn't crash, what type should variable x have, uintptr_t or physaddr_t?
+
+      	mystery_t x;
+      	char* value = return_a_pointer();
+      	*value = 10;
+      	x = (mystery_t) value;
+
+Answer: value is undoubtly virtual, but x... This code excerpt runs well even
+if x is of type physaddr_t, since x is not used to access memory. However, for
+this code to be correct, x must be virtual. Or else the code shall be like:
+x = (physaddr_t) (value - KERNBASE);
+
+Mar 12, 2012
+
+Question in Exercise 3
+
+1. mapping table
+Entry	Base Virtual Address	Points to (logically):
+1023	0xffc00000		Page table for top 4MB of phys memory
+1022	0xff800000		Page table for the next top 4MB of phys memory
+...	..........		...
+960	0xf0000000		Page table for the lowerest 4MB of phys memory
+959	0xefc00000		Page directory itself(VPT)
+958	0xef800000		Page table containing kernel stack
+957	0xef400000		Page directory itself(UVPT) accessible to user
+956	0xef000000		RO pages (UPAGES)
+955	0xeec00000		NA
+...
+2	0x00800000		NA
+1	0x00400000		NA
+0	0x00000000		Page table for the lowerest 4MB of phys memory
+
+2. Why it is necessary to map the first entry of the page directory to the page
+table of the first 4MB of RAM and remove the mapping at the end of the function?
+What would happen if it were omitted? Does this actually limit our kernel to be
+4MB? What must be true if our kernel were larger than 4MB?
+
+Because after the page directory is installed and before segment registers are
+reloaded, we are temporarily in the situation that the kernel linear adresses
+still should be equal to corresponding physical addresses for the kernel code to
+run correctly (because we link our kernel at KERNBASE + 0x100000 in
+lab2/kern/kernel.ld, load kernel image at physical address va & 0x00FFFFFF, or
+va - KERNBASE, effectively starting at 0x100000 in lab2/boot/main.c, and define
+physical memory addresses for accessing kernel text and data to be = va -
+KERNBASE via mygdt in lab2/kern/entry.S, effectively starting at 0x100000,
+coinciding with the actual physical loading address of the kernel), but such
+requirement is not automatically meet in the page directory just installed.
+To make our subsequent code that reload segment registers work, we should
+manually add mapping to page directory so that linear addresses be equal to
+physical address for all kernel addresses. Or else, an
+accessing-non-existing-memory page fault will error.
+
+Mapping (arbitrarily) only the first 4MB physical memory does limit our kernel
+to be able to address no more than this memory. Consider the fact that our
+kernel is loaded at physical address 0x100000 (1MB), the kernel is actually
+limited to [1MB, 4MB] area, a total of 3MB, unless of course, the kernel tries
+to make use of the first 1MB memory. If our kernel were larger than 4MB (to be
+precise, 3MB), we should extend the mapping to [0, ROUNDUP(1MB + sizeof(kernel),
+PGSIZE] to make sure that all kernel addresses are covered.
+
+3. Why will user programs not be able to read or write the kernel's memory? What
+specific mechanisms protect the kernel memory?
+
+Because according to i386's protection mechanism, pages marked as owned
+by supervisor(U/S = 0) are not accessable to user programs. The mechanisms
+used to protect the kernel memory are combinations of two levels of owner bits
+and R/W bits, plus a WP (Write Protect) bit in cr0 introduced since 486.
+
+20120330
+
+My own questions:
+
++ Why it is safe to treat all elements in variable argument list as dwords? What
+  if we has a non-dword argument in the list? Similarly, our backtrace code also
+  makes this assumption.
+
++ Is there a bug in JOS? The C code 'cprintf("%08x", x);' won't work.
+
+
+A unsolved question raised at 20120428:
+
+For lab2-snapshot-20120428-1640.tar.gz (md5sum=2dee79da29aa0a4be124a1d52a9621e1),
+@ obj/kern/kernel.asm, line 4652:
+
+The first instruction of f010282c <stab_binsearch> is one greater than the
+last one of the previous function, f0102803 <cprintf>. It's obvious that
+the compiler does not insert an empty byte between code for functions. It
+does align function starting address at multiple of 0x4. Because the last
+instruction of f0102803 <cprintf> has address f010282b, the
+beginning and ending N_SO stabs delimiting the two functions happen to be
+equal. The algorithm stab_binsearch will fail if it searches the address
+f010282b. This might be quite unlikely, since typically the last two
+instructions for functions are LEAVE & ret. But this LEAVE is optional.
+LEAVE will releases the stack frame. RET will pop return address for the
+caller from the stack. It is possible we construct a function that generates
+instructions like this:
+call subfunc
+ret
+Note:
+1. this function shall has no argument and no return value in the hope that
+   the prologue 'push ebp; move ebp, esp' is not generated.
+2. this subfunc shall has no argument and no return value.
+
+If ret's address + 1 happens to be aligned on 4bytes, and we do backtrace in this
+subfunc, the algorithm stab_binsearch() might product incorrect result.
+If this problem is confirmed, it is quite trivial to fix: just skip all ending
+N_SO stabs (string index == 0).
+

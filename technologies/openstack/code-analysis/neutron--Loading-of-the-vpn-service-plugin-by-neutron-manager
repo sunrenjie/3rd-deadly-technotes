@@ -1,0 +1,65 @@
+
+[code analysis as of commit 23037823adbbf0bfc9c6398e8d460e84d49e4e6f]
+neutron: Loading of the vpn service plugin by neutron manager.
+
+Service plugins are specified in config files and loaded by neutron manager.
+    setup.cfg:161:    vpnaas = neutron.services.vpn.plugin:VPNDriverPlugin
+
+    etc/neutron.conf:62:# service_plugins =
+    etc/neutron.conf:63:# Example: service_plugins = router,firewall,lbaas,vpnaas,metering
+
+    neutron/manager.py:85:class NeutronManager(object):
+
+    neutron/manager.py:95:    def __init__(self, options=None, config_file=None):
+
+Neutron manager loads core plugin as well.
+    neutron/manager.py:109:        plugin_provider = cfg.CONF.core_plugin
+
+    neutron/manager.py:124:        self.service_plugins = {constants.CORE: self.plugin}
+    neutron/manager.py:125:        self._load_service_plugins()
+
+For each service plugin listed in service_plugins section, create an instance,
+store in self.service_plugins with service type as key. Only one plugin allowed
+for each service type.
+Note that neutron.services.vpn.plugin.VPNDriverPlugin is loaded here.
+    neutron/manager.py:127:    def _get_plugin_instance(self, namespace, plugin_provider):
+    neutron/manager.py:128:        try:
+    neutron/manager.py:129:            # Try to resolve plugin by name
+    neutron/manager.py:130:            mgr = driver.DriverManager(namespace, plugin_provider)
+    neutron/manager.py:131:            plugin_class = mgr.driver
+    neutron/manager.py:132:        except RuntimeError as e1:
+    neutron/manager.py:133:            # fallback to class name
+    neutron/manager.py:134:            try:
+    neutron/manager.py:135:                plugin_class = importutils.import_class(plugin_provider)
+    neutron/manager.py:136:            except ImportError as e2:
+    neutron/manager.py:137:                LOG.exception(_("Error loading plugin by name, %s"), e1)
+    neutron/manager.py:138:                LOG.exception(_("Error loading plugin by class, %s"), e2)
+    neutron/manager.py:139:                raise ImportError(_("Plugin not found."))
+    neutron/manager.py:140:        return plugin_class()
+
+    neutron/manager.py:156:    def _load_service_plugins(self):
+    neutron/manager.py:157:        """Loads service plugins.
+
+    neutron/manager.py:162:        # load services from the core plugin first
+    neutron/manager.py:163:        self._load_services_from_core_plugin()
+
+    neutron/manager.py:165:        plugin_providers = cfg.CONF.service_plugins
+
+    neutron/manager.py:167:        for provider in plugin_providers:
+
+    neutron/manager.py:172:            plugin_inst = self._get_plugin_instance('neutron.service_plugins',
+    neutron/manager.py:173:                                                    provider)
+
+    neutron/manager.py:183:            self.service_plugins[plugin_inst.get_plugin_type()] = plugin_inst
+Core plugin and service plugins are available from property-like methods.
+Note that only one instance of NeutronManager is allowed, which is hidden as
+implementation details. Actually, the callers are expected to use get_plugin()
+and get_service_plugins() directly.
+    neutron/manager.py:209:    @classmethod
+    neutron/manager.py:210:    def get_plugin(cls):
+    neutron/manager.py:211:        return cls.get_instance().plugin
+    neutron/manager.py:212:
+    neutron/manager.py:213:    @classmethod
+    neutron/manager.py:214:    def get_service_plugins(cls):
+    neutron/manager.py:215:        return cls.get_instance().service_plugins
+

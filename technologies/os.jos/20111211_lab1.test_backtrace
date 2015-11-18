@@ -1,0 +1,101 @@
+
+This text tries to address Exercise 11 of lab1.
+Dec 11, 2011
+
+disassembled code for test_backtrace():
+
+// Test the stack backtrace function (lab 1 only)
+void
+test_backtrace(int x)
+{
+f01000dd:	55                   	push   %ebp
+f01000de:	89 e5                	mov    %esp,%ebp
+f01000e0:	53                   	push   %ebx
+f01000e1:	83 ec 14             	sub    $0x14,%esp
+f01000e4:	8b 5d 08             	mov    0x8(%ebp),%ebx
+	cprintf("entering test_backtrace %d\n", x);
+f01000e7:	89 5c 24 04          	mov    %ebx,0x4(%esp)
+f01000eb:	c7 04 24 12 17 10 f0 	movl   $0xf0101712,(%esp)
+f01000f2:	e8 94 08 00 00       	call   f010098b <cprintf>
+	if (x > 0)
+f01000f7:	85 db                	test   %ebx,%ebx
+f01000f9:	7e 0d                	jle    f0100108 <test_backtrace+0x2b>
+		test_backtrace(x-1);
+f01000fb:	8d 43 ff             	lea    -0x1(%ebx),%eax
+f01000fe:	89 04 24             	mov    %eax,(%esp)
+f0100101:	e8 d7 ff ff ff       	call   f01000dd <test_backtrace>
+f0100106:	eb 1c                	jmp    f0100124 <test_backtrace+0x47>
+	else
+		mon_backtrace(0, 0, 0);
+f0100108:	c7 44 24 08 00 00 00 	movl   $0x0,0x8(%esp)
+f010010f:	00 
+f0100110:	c7 44 24 04 00 00 00 	movl   $0x0,0x4(%esp)
+f0100117:	00 
+f0100118:	c7 04 24 00 00 00 00 	movl   $0x0,(%esp)
+f010011f:	e8 dc 05 00 00       	call   f0100700 <mon_backtrace>
+	cprintf("leaving test_backtrace %d\n", x);
+f0100124:	89 5c 24 04          	mov    %ebx,0x4(%esp)
+f0100128:	c7 04 24 2e 17 10 f0 	movl   $0xf010172e,(%esp)
+f010012f:	e8 57 08 00 00       	call   f010098b <cprintf>
+}
+f0100134:	83 c4 14             	add    $0x14,%esp
+f0100137:	5b                   	pop    %ebx
+f0100138:	5d                   	pop    %ebp
+f0100139:	c3                   	ret    
+
+The stack after on entering test_backtrace(0) before executing the first instruction ('push %ebp')
+
+0x000000000010ef2c <bogus+       0>:    0xf0100106      0x00000000      0x00000001      0xf010ef68
+0x000000000010ef3c <bogus+      16>:    0x00000000      0xf01009a5      0x00000002      0xf010ef68
+0x000000000010ef4c <bogus+      32>:    0xf0100106      0x00000001      0x00000002      0xf010ef88
+0x000000000010ef5c <bogus+      48>:    0x00000000      0xf01009a5      0x00000003      0xf010ef88
+0x000000000010ef6c <bogus+      64>:    0xf0100106      0x00000002      0x00000003      0xf010efa8
+0x000000000010ef7c <bogus+      80>:    0x00000000      0xf01009a5      0x00000004      0xf010efa8
+0x000000000010ef8c <bogus+      96>:    0xf0100106      0x00000003      0x00000004      0x00000000
+0x000000000010ef9c <bogus+     112>:    0x00000000      0x00010094      0x00000005      0xf010efc8
+0x000000000010efac <bogus+     128>:    0xf0100106      0x00000004      0x00000005      0x00000000
+0x000000000010efbc <bogus+     144>:    0x00000000      0x00000000      0x00010094      0xf010eff8
+0x000000000010efcc <bogus+     160>:    0xf01001cd      0x00000005      0x00000001      0x00000003
+
+Annotation of the stack contents (listed in the direction of stack growth):
+0x000000000010efd0 holds first (and only) argument of test_backtrace(); referred in 'mov 0x8(%ebp),%ebx'
+0x000000000010efcc *is* value of esp (i.e., stack top) on entering 1st round of test_backtrace()
+0x000000000010efcc holds addr of next instruction on returning: C code 'while(1) {...}'
+0x000000000010efc8 holds ebp on entering subroutine; result of '0xf01000dd: push %ebp'
+0x000000000010efc4 holds ebx on entering subroutine; result of '0xf01000e0: push %ebx'
+0x000000000010efc0 \  5 dwords allocated in 'sub $0x14,%esp'; only top 3 dwords are actually used
+0x000000000010efbc |  with bottom 2 left unused.
+0x000000000010efb8  > starting from this one, 3 dwords used in 'mon_backtrace(0, 0, 0);'
+0x000000000010efb4 |  starting from this one, 2 dwords used in the two cprintf()
+0x000000000010efb0 /  starting from this one, 1 dword  used in (recursive) test_backtrace();
+0x000000000010efac holds addr of the next instruction of returning: C code 'test_backtrace(x-1);'
+...
+
+Note:
+0. The possible reason why two dwords are allocated yet unused:
+For each call of subroutine test_backtrace(), 6 dwords are required
+(1 ebp + 1 ebx + 3 variable + 1 return addr),
+if 2 more are allocated, a total of 8 dwords are actually used, to the
+effect that the stack 'frame' size is aligned to some boundary
+(apparently 2^5 bytes in this case).
+
+1. 0x000000000010efac - i * 0x20 (i = 0 .. 4) hold the same dwords.
+These dwords hold addresses of next instruction on returning of (recursive)
+calls of 'test_backtrace();' which happens to be '0xf0100106: jmp f0100124 <test_backtrace+0x47>'
+Besides, these addresses are stack top for each call. In addition, if we
+continue debugging and follow the stack down further to the point when i = 5,
+the value is different though still within the function body (0xf0100124),
+since 'mon_backtrace(0, 0, 0);' is called when x=0.
+
+2. 0x000000000010efc8 - i * 0x20 (i = 0 .. 4) hold decreasing (by sizeof stack frame) dwords.
+These dwords hold ebp values for stack 'bottom' for each call of 'test_backtrace();'
+
+3. 0x000000000010efd0 - i * 0x20 (i = 0 .. 4) hold decreasing (by 1) dwords.
+These dwords hold (the one and only) argument to test_backtrace().
+
+4. If all functions are compiled to begin with 'push %ebp; mov %esp, %ebp',
+the trace back is quite well defined. Starting from the current function,
+ebp will point to the stack point of the caller, (*(ebp+1)) will be the return
+address to the caller, ebp+2 will be argv. Follow (*ebp) recursively, we will
+finally come to a zero value ebp, which indicates the end of the call stack.
+This zero valued esp is defined by 'movl $0x0,%ebp' at entry.S.

@@ -1,0 +1,22 @@
+Put the following contents into ~/.gradle/init.d/sonatype-nexus.gradle:
+
+allprojects {
+    repositories {
+        maven {
+            url "http://localhost:8081/nexus/content/groups/public"
+        }
+    }
+    buildscript {
+        repositories {
+            maven {
+                url "http://localhost:8081/nexus/content/groups/public"
+            }
+        }
+    }
+}
+
+
+Reference:
+[1] https://discuss.gradle.org/t/configure-buildscript-repositories-for-all-project-globally-in-init-gradle/6572
+[2] http://www.cnblogs.com/huang0925/p/3940528.html
+

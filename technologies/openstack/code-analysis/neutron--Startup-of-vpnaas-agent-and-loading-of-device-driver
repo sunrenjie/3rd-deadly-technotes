@@ -1,0 +1,116 @@
+
+[code analysis as of commit 23037823adbbf0bfc9c6398e8d460e84d49e4e6f]
+neutron: Startup of vpnaas agent and loading of device driver
+
+Class OpenSwanProcess, essentially a wrapper of openswan binaries, is the
+main process for the neutron vpn device driver named 'openswan' (represented
+by the class OpenSwanDriver).
+    neutron/services/vpn/device_drivers/ipsec.py:292:class OpenSwanProcess(BaseSwanProcess):
+
+The class IPsecVpnDriverApi is the agent side rpc interface, here used by class
+OpenSwanDriver (inheriting from class IPsecDriver) to forwards call of
+update_status() and get_vpn_services_on_host() to server side rpc interface.
+    neutron/services/vpn/device_drivers/ipsec.py:447:class IPsecVpnDriverApi(proxy.RpcProxy):
+
+    neutron/services/vpn/device_drivers/ipsec.py:463:    def update_status(self, context, status):
+
+    neutron/services/vpn/device_drivers/ipsec.py:469:        return self.cast(context,
+    neutron/services/vpn/device_drivers/ipsec.py:470:                         self.make_msg('update_status',
+    neutron/services/vpn/device_drivers/ipsec.py:471:                                       status=status),
+    neutron/services/vpn/device_drivers/ipsec.py:472:                         version=self.IPSEC_PLUGIN_VERSION,
+    neutron/services/vpn/device_drivers/ipsec.py:473:                         topic=self.topic)
+
+The abstract class IPsecDriver implements majority of ipsec functionalities,
+leaving create_process as abstract method for derived class (like
+OpenSwanDriver) which actually knows about the underlying vpn software
+implementation.
+    neutron/services/vpn/device_drivers/ipsec.py:476:@six.add_metaclass(abc.ABCMeta)
+    neutron/services/vpn/device_drivers/ipsec.py:477:class IPsecDriver(device_drivers.DeviceDriver):
+
+    neutron/services/vpn/device_drivers/ipsec.py:491:    def __init__(self, agent, host):
+
+    neutron/services/vpn/device_drivers/ipsec.py:504:        self.conn.create_consumer(
+    neutron/services/vpn/device_drivers/ipsec.py:505:            node_topic,
+    neutron/services/vpn/device_drivers/ipsec.py:506:            self.create_rpc_dispatcher(),
+    neutron/services/vpn/device_drivers/ipsec.py:507:            fanout=False)
+    neutron/services/vpn/device_drivers/ipsec.py:508:        self.conn.consume_in_thread()
+    neutron/services/vpn/device_drivers/ipsec.py:509:        self.agent_rpc = IPsecVpnDriverApi(topics.IPSEC_DRIVER_TOPIC, '1.0')
+
+    neutron/services/vpn/device_drivers/ipsec.py:515:    def create_rpc_dispatcher(self):
+    neutron/services/vpn/device_drivers/ipsec.py:516:        return q_rpc.PluginRpcDispatcher([self])
+
+The class OpenSwanDriver is the device driver that is meant to be specified at
+config file and get loaded by the manger class VPNAgent.
+    neutron/services/vpn/device_drivers/ipsec.py:708:class OpenSwanDriver(IPsecDriver):
+    neutron/services/vpn/device_drivers/ipsec.py:709:    def create_process(self, process_id, vpnservice, namespace):
+    neutron/services/vpn/device_drivers/ipsec.py:710:        return OpenSwanProcess(
+    neutron/services/vpn/device_drivers/ipsec.py:711:            self.conf,
+    neutron/services/vpn/device_drivers/ipsec.py:712:            self.root_helper,
+    neutron/services/vpn/device_drivers/ipsec.py:713:            process_id,
+    neutron/services/vpn/device_drivers/ipsec.py:714:            vpnservice,
+    neutron/services/vpn/device_drivers/ipsec.py:715:            namespace)
+
+    etc/vpn_agent.ini:8:# vpn_device_driver=neutron.services.vpn.device_drivers.ipsec.OpenSwanDriver
+
+The definition of the vpn manager class and the way the vpn agent starts
+suggest that vpn agent is essentially an L3 agent.
+
+    neutron/services/vpn/agent.py:33:class VPNAgent(l3_agent.L3NATAgentWithStateReport):
+    neutron/services/vpn/agent.py:34:    """VPNAgent class which can handle vpn service drivers."""
+    neutron/services/vpn/agent.py:35:    def __init__(self, host, conf=None):
+    neutron/services/vpn/agent.py:36:        super(VPNAgent, self).__init__(host=host, conf=conf)
+    neutron/services/vpn/agent.py:37:        self.setup_device_drivers(host)
+    neutron/services/vpn/agent.py:38:
+    neutron/services/vpn/agent.py:39:    def setup_device_drivers(self, host):
+
+    neutron/services/vpn/agent.py:49:        device_drivers = cfg.CONF.vpnagent.vpn_device_driver
+    neutron/services/vpn/agent.py:50:        self.devices = []
+    neutron/services/vpn/agent.py:51:        for device_driver in device_drivers:
+
+    neutron/services/vpn/agent.py:53:                self.devices.append(
+    neutron/services/vpn/agent.py:54:                    importutils.import_object(device_driver, self, host))
+
+    neutron/services/vpn/agent.py:146:def main():
+    neutron/services/vpn/agent.py:147:    l3_agent.main(
+    neutron/services/vpn/agent.py:148:        manager='neutron.services.vpn.agent.VPNAgent')
+
+    neutron/agent/l3_agent.py:966:def main(manager='neutron.agent.l3_agent.L3NATAgentWithStateReport'):
+
+    neutron/agent/l3_agent.py:978:    legacy.modernize_quantum_config(conf)
+    neutron/agent/l3_agent.py:979:    server = neutron_service.Service.create(
+    neutron/agent/l3_agent.py:980:        binary='neutron-l3-agent',
+    neutron/agent/l3_agent.py:981:        topic=topics.L3_AGENT,
+    neutron/agent/l3_agent.py:982:        report_interval=cfg.CONF.AGENT.report_interval,
+    neutron/agent/l3_agent.py:983:        manager=manager)
+    neutron/agent/l3_agent.py:984:    service.launch(server).wait()
+
+Service.create() is essentially an alternative initializer. It defines various
+default variables, including host, binary, etc. with which it creates an
+instance of this class and returns it.
+Note that the vpn agent manger, neutron.services.vpn.agent.VPNAgent, is
+initialized here with the variable 'host'.
+    neutron/service.py:190:class Service(service.Service):
+
+    neutron/service.py:197:    def __init__(self, host, binary, topic, manager, report_interval=None,
+    neutron/service.py:198:                 periodic_interval=None, periodic_fuzzy_delay=None,
+    neutron/service.py:199:                 *args, **kwargs):
+
+    neutron/service.py:202:        self.manager_class_name = manager
+    neutron/service.py:203:        manager_class = importutils.import_class(self.manager_class_name)
+    neutron/service.py:204:        self.manager = manager_class(host=host, *args, **kwargs)
+
+    neutron/service.py:238:    @classmethod
+    neutron/service.py:239:    def create(cls, host=None, binary=None, topic=None, manager=None,
+    neutron/service.py:240:               report_interval=None, periodic_interval=None,
+    neutron/service.py:241:               periodic_fuzzy_delay=None):
+
+    neutron/service.py:253:        if not host:
+    neutron/service.py:254:            host = CONF.host
+
+    neutron/service.py:268:        service_obj = cls(host, binary, topic, manager,
+    neutron/service.py:269:                          report_interval=report_interval,
+    neutron/service.py:270:                          periodic_interval=periodic_interval,
+    neutron/service.py:271:                          periodic_fuzzy_delay=periodic_fuzzy_delay)
+    neutron/service.py:272:
+    neutron/service.py:273:        return service_obj
+

@@ -1,0 +1,18 @@
+function install_notes {
+  # XXX: parameterize host dir /host0
+  echo '#Info: updating local notes repo ...'
+  if [ -d /host0/git/notes ]; then
+    if [ -d ~/notes ]; then
+      bash -c "cd ~/notes; git pull"
+    else
+      bash -c "cd; git clone /host0/git/notes"
+      bash -c "cd; ln -s notes/technologies/bash/bashrc.bootstrapper"
+      bash -c "cd; ln -s notes/technologies/bash/bashrc.available bashrc.enabled"
+    fi
+  fi
+  if ! grep -q 'bashrc\.bootstrapper' ~/.bashrc; then
+    echo 'source $HOME/bashrc.bootstrapper' >> ~/.bashrc
+  fi
+}
+
+install_notes

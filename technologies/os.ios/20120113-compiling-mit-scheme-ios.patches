@@ -1,0 +1,82 @@
+renjies-Mac:native renjie$ diff -r mit-scheme-c-9.1.1.stable mit-scheme-c-9.1.1 2>/dev/null | grep -v original
+diff -r mit-scheme-c-9.1.1.stable/src/configure mit-scheme-c-9.1.1/src/configure
+6003c6003
+<       CFLAGS="${CFLAGS} -O1"
+---
+>       CFLAGS="${CFLAGS} -O3"
+6261d6260
+<     MACOSX_SYSROOT=$SDKROOT
+diff -r mit-scheme-c-9.1.1.stable/src/etc/c-bundle.sh mit-scheme-c-9.1.1/src/etc/c-bundle.sh
+45,46d44
+< GEN_NONCE=gen-nonce
+< EXTRACT_DECLS=extract-liarc-decls
+diff -r mit-scheme-c-9.1.1.stable/src/lib/include/Makefile.in mit-scheme-c-9.1.1/src/lib/include/Makefile.in
+201c201
+<       findprim $(STD_SOURCES) > usrdef.c
+---
+>       ./findprim $(STD_SOURCES) > usrdef.c
+diff -r mit-scheme-c-9.1.1.stable/src/lib/include/configure mit-scheme-c-9.1.1/src/lib/include/configure
+5057c5057
+<       CFLAGS="${CFLAGS} -O1"
+---
+>       CFLAGS="${CFLAGS} -O3"
+5315d5314
+<     MACOSX_SYSROOT=$SDKROOT
+5378c5377
+<     if test "XXX$cross_compiling" = yes; then
+---
+>     if test "$cross_compiling" = yes; then
+18524c18523
+<   if test "SRJ$cross_compiling" = yes; then
+---
+>   if test "$cross_compiling" = yes; then
+22529c22528
+<   if test "XXX$cross_compiling" = yes; then
+---
+>   if test "$cross_compiling" = yes; then
+diff -r mit-scheme-c-9.1.1.stable/src/lib/include/confshared.h mit-scheme-c-9.1.1/src/lib/include/confshared.h
+649,652d648
+< #ifdef __arm__
+< # define MACHINE_TYPE         "arm"
+< # define CURRENT_FASL_ARCH    FASL_IA32
+< #endif
+diff -r mit-scheme-c-9.1.1.stable/src/lib/include/makegen/Makefile.in.in mit-scheme-c-9.1.1/src/lib/include/makegen/Makefile.in.in
+179c179
+<       findprim $(STD_SOURCES) > usrdef.c
+---
+>       ./findprim $(STD_SOURCES) > usrdef.c
+diff -r mit-scheme-c-9.1.1.stable/src/microcode/Makefile.in mit-scheme-c-9.1.1/src/microcode/Makefile.in
+201c201
+<       findprim $(STD_SOURCES) > usrdef.c
+---
+>       ./findprim $(STD_SOURCES) > usrdef.c
+diff -r mit-scheme-c-9.1.1.stable/src/microcode/configure mit-scheme-c-9.1.1/src/microcode/configure
+5057c5057
+<       CFLAGS="${CFLAGS} -O1"
+---
+>       CFLAGS="${CFLAGS} -O3"
+5315d5314
+<     MACOSX_SYSROOT=$SDKROOT
+5378c5377
+<     if test "XXX$cross_compiling" = yes; then
+---
+>     if test "$cross_compiling" = yes; then
+18524c18523
+<   if test "SRJ$cross_compiling" = yes; then
+---
+>   if test "$cross_compiling" = yes; then
+22529c22528
+<   if test "XXX$cross_compiling" = yes; then
+---
+>   if test "$cross_compiling" = yes; then
+diff -r mit-scheme-c-9.1.1.stable/src/microcode/confshared.h mit-scheme-c-9.1.1/src/microcode/confshared.h
+649,652d648
+< #ifdef __arm__
+< # define MACHINE_TYPE         "arm"
+< # define CURRENT_FASL_ARCH    FASL_IA32
+< #endif
+diff -r mit-scheme-c-9.1.1.stable/src/microcode/makegen/Makefile.in.in mit-scheme-c-9.1.1/src/microcode/makegen/Makefile.in.in
+179c179
+<       findprim $(STD_SOURCES) > usrdef.c
+---
+>       ./findprim $(STD_SOURCES) > usrdef.c

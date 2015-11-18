@@ -1,0 +1,49 @@
+
+How to deploy artifactory proxy server and have sbt run offline:
+
+Download artifactory: jfrog-artifactory-oss-4.1.3.zip and jdk 8 (artifactory
+4.1.3 requires Java 8).
+Configure artifactory to use Java 8 (via JAVA_HOME), to use port 8082 for web
+ui (8081 is already taken by nexus).
+Login to artifactory web ui, configure repositories (ivy+maven; see picture
+  proxy-ivy-mvn-setup.png at [1]):
+  * First add the remote repos, then define the virtual repos with the remote
+    repos added. 
+  + maven repos has 'Suppress POM Consistency Checks' enabled, though we don't
+    know why.
+
+Create overriding repository setting file ~/.sbt/repositories:
+
+[repositories]
+  local
+  my-ivy-proxy-releases: http://localhost:8082/artifactory/ivy-releases/, [organization]/[module]/(scala_[scalaVersion]/)(sbt_[sbtVersion]/)[revision]/[type]s/[artifact](-[classifier]).[ext]
+  my-maven-proxy-releases: http://localhost:8082/artifactory/maven-releases/
+
+Note that the ivy-releases resolver pattern defined here is different from the
+default one in defining ivy-releases virtual repo in artifactory (we used the
+default value), but it seems OK.
+
+The Artifactory web ui logs are extremely helpful.
+
+To invoke sbt to use our artifactory proxy server:
+sbt -Dsbt.override.build.repos=true clean package
+
+When the command runs for the first time, the proxy server will download
+everything if necessary (be sure to fire up vpn if necessary now). Afterwards,
+this command could be run without internet connection.
+
+========================
+How to migrate a artifactory installations from one machine to another?
+
+Migrating artifactory installations allows re-using of cached download files,
+configurations, etc. But there are things more than merely coping the
+installation directory:
+
++ Set JAVA_HOME variable. For convinience, put the line at the beginning of
+  the file bin/artifactory.sh; for example: 'export JAVA_HOME=~/bin/jdk1.8'.
++ Certain configurations uses absolute paths. The only one spotted thus far is
+  the 'url' option in etc/storage.properties.
+
+Ref:
+http://www.scala-sbt.org/0.13/docs/Proxy-Repositories.html
+

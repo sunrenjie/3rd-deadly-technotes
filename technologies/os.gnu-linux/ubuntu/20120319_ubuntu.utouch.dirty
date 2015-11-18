@@ -1,0 +1,265 @@
+
+20120319_ubuntu.utouch.dirty
+
+Here we keep a collection of info gathered while reading the utouch stack
+code.
+
+Temporarily we are focused on the software released with Ubuntu 11.10.
+There is a lot of comments at various header files.
+
+utouch-grail-2.0.1/include/grail.h:
+    301  * @touch: Array of individual touch information
+Comment and code differ: no such member for struct grail_event.
+
+Interactions with client, gesture() and event():
+    320 /**
+    321  * struct grail - Main grail device
+    322  * @get_clients: Called at the onset of new gestures to retrieve the list
+    323  * of listening clients.
+    324  * @event: Callback for kernel events passing through grail.
+    325  * @gesture: Main gesture callback.
+    326  * @impl: Grail implementation details.
+    327  * @gin: Gesture instatiation details.
+    328  * @gru: Gesture recognition details.
+    329  * @priv: Generic pointer to user-defined content.
+    330  *
+    331  * The grail device pulls events from the underlying device, detects
+    332  * gestures, and passes them on to the client via the gesture()
+    333  * callback. Events that are not gesture or for other reasons held back are
+    334  * passed on via the event() callback. The user provides information about
+    335  * windows and listening clients via the get_clients callback, which is
+    336  * called during gesture instantiation.
+    337  *
+    338  */
+    339 struct grail {
+    340         int (*get_clients)(struct grail *ge,
+    341                            struct grail_client_info *client, int max_clients,
+    342                            const struct grail_coord *coords, int num_coords,
+    343                            const grail_mask_t *types, int type_bytes);
+    344         void (*event)(struct grail *ge,
+    345                       const struct input_event *ev);
+    346         void (*gesture)(struct grail *ge,
+    347                         const struct grail_event *ev);
+    348         struct grail_impl *impl;
+    349         struct gesture_inserter *gin;
+    350         struct gesture_recognizer *gru;
+    351         void *priv;
+    352 };
+
+It is obvious that the string 'gin', strcut gesture_inserter are connected to
+gesture instantiation while the string 'gru', struct gesture_recognizer are
+connected to gesture recognition.
+
+Related structures (surprisingly, no comment written for them):
+utouch-grail-2.0.1/src/grail-inserter.h:
+     36 struct slot_state {
+     37         int type;
+     38         int priority;
+     39         int slice;
+     40         int timeout;
+     41         int sent;
+     42         int id;
+     43         int status;
+     44         int nclient;
+     45         struct grail_client_id client_id[DIM_CLIENT];
+     46         grail_mask_t span[DIM_TOUCH_BYTES];
+     47         struct gebuf buf;
+     48 };
+     49
+     50 struct gesture_inserter {
+     51         struct slot_state state[DIM_INSTANCE];
+     52         grail_mask_t types[DIM_GRAIL_TYPE_BYTES];
+     53         grail_mask_t unused[DIM_INSTANCE_BYTES];
+     54         grail_mask_t fresh[DIM_INSTANCE_BYTES];
+     55         grail_mask_t used[DIM_INSTANCE_BYTES];
+     56         grail_time_t time;
+     57         int gestureid;
+     58         int grab_active;
+     59         int grab_client;
+     60 };
+
+utouch-grail-2.0.1/src/grail-gestures.h:
+     40 struct filter_model {
+     41         float raw_delta;
+     42         float action_delta;
+     43         float velocity;
+     44         float value;
+     45         float original;
+     46         float sample;
+     47         float fuzz;
+     48         float bar;
+     49         grail_time_t original_ms;
+     50         grail_time_t sample_ms;
+     51         grail_time_t hold_ms;
+     52         grail_time_t bar_ms;
+     53 };
+     54
+     55 struct move_model {
+     56         struct filter_model fm[DIM_FM];
+     57         int tickle, active, timeout;
+     58         int single, multi, ntouch;
+     59         grail_time_t time;
+     60 };
+     ..
+     72 struct combo_model {
+     73         int active, gid;
+     74         int mintouch, maxtouch;
+     75         int nprop;
+     76         grail_prop_t prop[DIM_GRAIL_PROP];
+     77 };
+
+Note the location of a header file. If it is in include, it is meant to keep
+exported info that mostly likely act as interface. Header file in src is meant
+to be used by ./*.c only. Also, have a look at the way a lib is package,
+especially the -dev package, in which all header files are meant to be #included
+by code using this lib.
+
+In addition, as far as the grail lib is concerned, any function call meant to
+be externally visible will be declared as GRAIL_PUBLIC.
+
+It might be a bit important to gain a better understanding of the grail lib:
+
+utouch-grail-2.0.1/include/grail-types.h:
++ defined the various gesture types
+utouch-grail-2.0.1/include/grail-bits.h:
++ defined GRAIL_PUBLIC, the macro that helps in defining external functions.
++ defined various mask-related functions (XXX: what's that for, anyway?)
+  + I'd copy this excellent example for mask related tasks
+  + mask (type int)
+    + number constructed from the lower 3 (bits of 2's compl. rep. for 7) bits
+      specifies offset of the targeted bit
+    + number constructed from the left higher bits specifies offset of the
+      targeted unsigned char in the mask array(grail_mask_get)
+  + even a 'foreach' facility is included
+
+utouch-grail-2.0.1/include/grail.h:
++ we have all GRAIL_PUBLIC functions here
++ DIM_XXX_BYTES are defined to be # bytes required to represent these many
+  different vlaues
++ The various grail-related data structures are defined with binary
+  compatibility in mind:
+  + @utouch-grail-2.0.1/include/grail.h:
+    + grail_control, grail_frame, grail_element are defined to be extensible:
+      new elements may be added, but only in an appending fashion; existing ones
+      will never change in layouts (and offsets)
+    + a grail_new_raw is defined that accepts sizeof the above three structs as
+      arguments; such info is used to allocate new objects/instances of them
+      (see definitions for create_* @ utouch-grail-2.0.1/src/grail-init.c.)
+    + a grail_new is defined as grail_new_raw using sizeof info in this header
+      file. This is the most likely choice except when you want to use some
+      explicit version of structs.
++ functions definitions extracted using the command:
+  `grep -A 3 GRAIL_PUBLIC grail.h | grep '('`
+  + unsigned int GRAIL_PUBLIC grail_get_version(void);
+  + grail_handle GRAIL_PUBLIC grail_new_raw(utouch_frame_handle fh, ...
+    + allocate and initialize a new grail instance
+  + void GRAIL_PUBLIC grail_delete(grail_handle ge);
+    + destroy and delete the grail instance
+  + struct grail_control GRAIL_PUBLIC *grail_get_control(grail_handle ge);
+    + get a pointer to the internal control sub-structure grail_control
+  + const struct grail_frame GRAIL_PUBLIC * grail_pump_frame(grail_handle ...
+    + insert a new utouch_frame to the grail, return a newly induced (if any)
+      gesture frame
+  + int GRAIL_PUBLIC grail_open(struct grail *ge, int fd);
+    + initialize internal structures of a grail by reading file descriptor (fd)
+      of the kernel device
+  + int GRAIL_PUBLIC grail_idle(struct grail *ge, int fd, int ms);
+    + check whether the grail is idle in this time period
+  + int GRAIL_PUBLIC grail_pull(struct grail *ge, int fd);
+    + pull all grail events and process them (via grail callback function)
+  + void GRAIL_PUBLIC grail_close(struct grail *ge, int fd);
+    + deallocate all memory associated with this grail, clear the structure
+  + void GRAIL_PUBLIC grail_set_bbox(struct grail *ge, ..
+    + set grail unit bounding box (ref. for coordinates)
+  + void GRAIL_PUBLIC grail_get_units(const struct grail *ge, ...
+    + get device coordinate ranges
+  + grail_get_contact_frame(const struct grail *ge);
+    + return the current contact frame being processed
+    + can be called by the callback function
+  + void GRAIL_PUBLIC grail_filter_abs_events(struct grail *ge, int usage);
+    + legacy API; ignored
+  + int GRAIL_PUBLIC grail_get_contacts(const struct grail *ge, ...
+    + legacy API; ignored
+
+utouch-grail-2.0.1/src/evbuf.h:
++ defined evbuf, a cyclic buffer of input_event and its manipulating functions
+  + The functions allow head and tail to blindly increment past each other;
+    there is absolutely NO check against such conditions. Valid old contents may
+    be overwritten if the buffer is full; trash contents may be returned if the
+    buffer is exhausted.
+  + Jumping from head to tail and vice versa are implemented as something like
+    'evbuf->head &= DIM_EVENTS - 1;'. This code is good in that it works blindly
+    without checking boundaries. Yet it is probably neither efficient nor
+    protable. It requires that DIM_EVENTS = 2^n for some n. I'd prefer to
+    'if (evbuf->head = DIM_EVENTS) evbuf->head = 0;'
+  + I guess speed is critical for a buffer designed this way.
+
+utouch-grail-2.0.1/src/gebuf.h:
++ a cyclic buffer of gesture_event, analogous to evbuf in ./evbuf.h
+
+utouch-grail-2.0.1/src/grail-gestures.h:
++ This header has absolutely NO comment on either data structures or functions.
++ Functions are generally of the form gin_xxx.
+
+utouch-grail-2.0.1/src/grail-impl.h:
++ defined struct grail_impl (not documented at point of definition)
++ defined function create_grail2 and destroy_grail2; they are apparently used to
+  create/destroy grail_impl objects, with 'grail2' likely meaning grail_impl.
+
+utouch-grail-2.0.1/src/grail-inserter.h:
++ This header has absolutely NO comment on either data structures or functions.
++ Functions are generally of the form gru_xxx.
+
+utouch-grail-2.0.1/src/grail-recognizer.h:
++ defined struct gesture_recognizer:
+     27 struct gesture_recognizer {
+     28         struct move_model move;
+     29         struct combo_model touch;
+     30         struct combo_model drag;
+     31         struct combo_model pinch;
+     32         struct combo_model rotate;
+     33         struct combo_model wintouch;
+     34         struct combo_model windrag;
+     35         struct combo_model winpinch;
+     36         struct combo_model winrotate;
+     37         struct tapping_model tapping;
+     38 };
++ defined functions
+  + gru_init
+  + gru_recognize
+  + gru_destroy
+
+utouch-grail-2.0.1/src/grailbuf.h:
++ a cyclic buffer of grail_event, analogous to evbuf in ./evbuf.h
+
+utouch-grail-2.0.1/src/grail-api.c:
+     48         ret = fstat(fd, &fs);
+     49         if (ret)
+     50                 return ret;
++ fstat @ <sys/stat.h>
+  + writes information about the attributes of the file in fs
+  + returns 0 on success, or -1 on failure
+
+We are interested in the exact client in this relevant context (Ubuntu 11.10).
+Natually we will take a look at xserver-xorg-input-evdev which is dependent
+libutouch-grail1 in package level. After examining the code and patches,
+we found it at
+xserver-xorg-input-evdev-2.6.0/src/evdev-grail.c:
+    325 int
+    326 GrailOpen(InputInfoPtr pInfo)
+    327 {
+    328     EvdevPtr pEvdev = pInfo->private;
+    329
+    330     pEvdev->grail = malloc(sizeof(struct grail));
+    331     if (!pEvdev->grail) {
+    332         xf86Msg(X_ERROR, "evdev-grail: failed to allocate grail structure\n");
+    333         return -1;
+    334     }
+    335
+    336     memset(pEvdev->grail, 0, sizeof(struct grail));
+    337     pEvdev->grail->get_clients = GetClients;
+    338     pEvdev->grail->event = GrailEvent;
+    339     pEvdev->grail->gesture = GrailGesture;
+    340     pEvdev->grail->priv = pInfo;
+
+

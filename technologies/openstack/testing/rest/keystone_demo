@@ -1,0 +1,13 @@
+
+export CINDER_VERSION=2
+export NOVA_VERSION=1.1
+export OS_IDENTITY_API_VERSION=2.0
+export OS_VOLUME_API_VERSION=2
+export COMPUTE_API_VERSION=1.1
+
+export OS_PASSWORD=password
+export OS_AUTH_URL=http://192.168.0.225:5000/v2.0
+export OS_USERNAME=demo
+export os_CODENAME=Heisenbug
+export OS_TENANT_NAME=demo
+

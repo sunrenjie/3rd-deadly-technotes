@@ -1,0 +1,1 @@
+../bashrc.available/52-add-func-code-analyzers.sh

@@ -1,0 +1,19 @@
+
+An example interface description outputted by ifconfig on MacOSX:
+
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	ether 04:0c:ce:d1:0a:c6 
+	inet6 fe80::60c:ceff:fed1:ac6%en0 prefixlen 64 scopeid 0x4 
+	inet 10.233.97.228 netmask 0xffffe000 broadcast 10.233.127.255
+	media: autoselect
+	status: active
+
+The last 16 bits for the various representations:
+0b0110 0001 1110 0100 10.233.97.228 (IP)
+0b0111 1111 1111 1111 10.233.127.255 (broadcast)
+0b1110 0000 0000 0000 0xffffe000 (netmask)
+0b0110 0000 0000 0000 10.233.96.0/19 (network)
+
+We can see that the network features 13-bit host IDs, and can be described as
+10.223.96.0/19.
+

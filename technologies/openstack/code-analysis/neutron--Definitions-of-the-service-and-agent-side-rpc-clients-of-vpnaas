@@ -1,0 +1,133 @@
+
+[code analysis as of commit 23037823adbbf0bfc9c6398e8d460e84d49e4e6f]
+neutron: Definitions of the service and agent side rpc clients of vpnaas
+
+Server (service) side rpc consists of the following steps in the main class
+(IPsecVPNDriver in this case):
+1) create connection via rpc.create_connection(new=True)
+2) create consumer on the connection with a rpc dispatcher object, which is
+   initialized with the receiver (callback), which is IPsecVpnDriverCallBack in
+   this case. We can see that it now supports rpc call of update_status().
+   Note that the rpc dispatcher is created in the callback class instance,
+   though it really does not matter where is the object stored as long as the
+   receiver is set to the callback class instance.
+3) set producer 'port' self.agent_rpc to an instance of a class derived from
+   proxy.RpcProxy, which in this case is IPsecVpnAgentApi (whose base class
+   BaseIPsecVpnAgentApi is derived from proxy.RpcProxy).
+    neutron/services/vpn/service_drivers/ipsec.py:32:class IPsecVpnDriverCallBack(object):
+
+    neutron/services/vpn/service_drivers/ipsec.py:40:    def __init__(self, driver):
+    neutron/services/vpn/service_drivers/ipsec.py:41:        self.driver = driver
+    neutron/services/vpn/service_drivers/ipsec.py:42:
+    neutron/services/vpn/service_drivers/ipsec.py:43:    def create_rpc_dispatcher(self):
+    neutron/services/vpn/service_drivers/ipsec.py:44:        return n_rpc.PluginRpcDispatcher([self])
+
+Since VPNDriverPlugin (the service plugin) initializes IPsecVPNDriver (the
+service provider) by providing itself as plugin argument, and it inherits from
+VPNPluginRpcDbMixin the update_status_by_agent() method. This call actually is
+forwarded to VPNPluginRpcDbMixin.update_status_by_agent().
+    neutron/services/vpn/service_drivers/ipsec.py:54:    def update_status(self, context, status):
+    neutron/services/vpn/service_drivers/ipsec.py:55:        """Update status of vpnservices."""
+    neutron/services/vpn/service_drivers/ipsec.py:56:        plugin = self.driver.service_plugin
+    neutron/services/vpn/service_drivers/ipsec.py:57:        plugin.update_status_by_agent(context, status)
+
+    neutron/services/vpn/service_drivers/ipsec.py:60:class IPsecVpnAgentApi(service_drivers.BaseIPsecVpnAgentApi):
+    neutron/services/vpn/service_drivers/ipsec.py:61:    """Agent RPC API for IPsecVPNAgent."""
+    neutron/services/vpn/service_drivers/ipsec.py:62:
+    neutron/services/vpn/service_drivers/ipsec.py:63:    RPC_API_VERSION = BASE_IPSEC_VERSION
+    neutron/services/vpn/service_drivers/ipsec.py:64:
+    neutron/services/vpn/service_drivers/ipsec.py:65:    def __init__(self, topic, default_version):
+    neutron/services/vpn/service_drivers/ipsec.py:66:        super(IPsecVpnAgentApi, self).__init__(
+    neutron/services/vpn/service_drivers/ipsec.py:67:            topics.IPSEC_AGENT_TOPIC, topic, default_version)
+
+    neutron/services/vpn/service_drivers/ipsec.py:70:class IPsecVPNDriver(service_drivers.VpnDriver):
+    neutron/services/vpn/service_drivers/ipsec.py:71:    """VPN Service Driver class for IPsec."""
+    neutron/services/vpn/service_drivers/ipsec.py:72:
+    neutron/services/vpn/service_drivers/ipsec.py:73:    def __init__(self, service_plugin):
+    neutron/services/vpn/service_drivers/ipsec.py:74:        super(IPsecVPNDriver, self).__init__(service_plugin)
+    neutron/services/vpn/service_drivers/ipsec.py:75:        self.callbacks = IPsecVpnDriverCallBack(self)
+    neutron/services/vpn/service_drivers/ipsec.py:76:        self.conn = rpc.create_connection(new=True)
+    neutron/services/vpn/service_drivers/ipsec.py:77:        self.conn.create_consumer(
+    neutron/services/vpn/service_drivers/ipsec.py:78:            topics.IPSEC_DRIVER_TOPIC,
+    neutron/services/vpn/service_drivers/ipsec.py:79:            self.callbacks.create_rpc_dispatcher(),
+    neutron/services/vpn/service_drivers/ipsec.py:80:            fanout=False)
+    neutron/services/vpn/service_drivers/ipsec.py:81:        self.conn.consume_in_thread()
+    neutron/services/vpn/service_drivers/ipsec.py:82:        self.agent_rpc = IPsecVpnAgentApi(
+    neutron/services/vpn/service_drivers/ipsec.py:83:            topics.IPSEC_AGENT_TOPIC, BASE_IPSEC_VERSION)
+
+Definition of update_status_by_agent():
+    neutron/db/vpn/vpn_db.py:637:class VPNPluginRpcDbMixin():
+
+    neutron/db/vpn/vpn_db.py:657:    def update_status_by_agent(self, context, service_status_info_list):
+
+    neutron/db/vpn/vpn_db.py:675:        with context.session.begin(subtransactions=True):
+    neutron/db/vpn/vpn_db.py:676:            for vpnservice in service_status_info_list:
+    neutron/db/vpn/vpn_db.py:677:                try:
+    neutron/db/vpn/vpn_db.py:678:                    vpnservice_db = self._get_vpnservice(
+    neutron/db/vpn/vpn_db.py:679:                        context, vpnservice['id'])
+    neutron/db/vpn/vpn_db.py:680:                except vpnaas.VPNServiceNotFound:
+    neutron/db/vpn/vpn_db.py:681:                    LOG.warn(_('vpnservice %s in db is already deleted'),
+    neutron/db/vpn/vpn_db.py:682:                             vpnservice['id'])
+    neutron/db/vpn/vpn_db.py:683:                    continue
+    neutron/db/vpn/vpn_db.py:684:
+    neutron/db/vpn/vpn_db.py:685:                if (not utils.in_pending_status(vpnservice_db.status)
+    neutron/db/vpn/vpn_db.py:686:                    or vpnservice['updated_pending_status']):
+    neutron/db/vpn/vpn_db.py:687:                    vpnservice_db.status = vpnservice['status']
+    neutron/db/vpn/vpn_db.py:688:                for conn_id, conn in vpnservice[
+    neutron/db/vpn/vpn_db.py:689:                    'ipsec_site_connections'].items():
+Here VPNPluginDb._update_connection_status() is called. It works only because
+the call is always invoked on behalf of an instance of class VPNDriverPlugin()
+(which is derived from VPNPlugin, which again is derived from VPNPluginDb).
+    neutron/db/vpn/vpn_db.py:690:                    self._update_connection_status(
+    neutron/db/vpn/vpn_db.py:691:                        context, conn_id, conn['status'],
+    neutron/db/vpn/vpn_db.py:692:                        conn['updated_pending_status'])
+
+
+Loading of server provider IPsecVPNDriver:
+    neutron/services/vpn/plugin.py:40:class VPNDriverPlugin(VPNPlugin, vpn_db.VPNPluginRpcDbMixin):
+
+    neutron/services/vpn/plugin.py:46:        drivers, default_provider = service_base.load_drivers(
+    neutron/services/vpn/plugin.py:47:            constants.VPN, self)
+
+Agent side rpc code is similar to server side:
+1) The main class is IPsecDriver (or precisely, its derived class
+   OpenSwanDriver), for which self.conn and self.agent_rpc are defined.
+2) There is no dedicated callback class; the receiver set for rpc dispatcher is
+   the main class itself. Maybe because there is actually no server->agent rpc
+   function call.
+3) Output port class is IPsecVpnDriverApi. It has the agent->server rpc call
+   adaptor for function update_status().
+
+    neutron/services/vpn/device_drivers/ipsec.py:447:class IPsecVpnDriverApi(proxy.RpcProxy):
+
+    neutron/services/vpn/device_drivers/ipsec.py:463:    def update_status(self, context, status):
+
+    neutron/services/vpn/device_drivers/ipsec.py:469:        return self.cast(context,
+    neutron/services/vpn/device_drivers/ipsec.py:470:                         self.make_msg('update_status',
+    neutron/services/vpn/device_drivers/ipsec.py:471:                                       status=status),
+    neutron/services/vpn/device_drivers/ipsec.py:472:                         version=self.IPSEC_PLUGIN_VERSION,
+    neutron/services/vpn/device_drivers/ipsec.py:473:                         topic=self.topic)
+
+    neutron/services/vpn/device_drivers/ipsec.py:476:@six.add_metaclass(abc.ABCMeta)
+    neutron/services/vpn/device_drivers/ipsec.py:477:class IPsecDriver(device_drivers.DeviceDriver):
+
+    neutron/services/vpn/device_drivers/ipsec.py:491:    def __init__(self, agent, host):
+
+    neutron/services/vpn/device_drivers/ipsec.py:504:        self.conn.create_consumer(
+    neutron/services/vpn/device_drivers/ipsec.py:505:            node_topic,
+    neutron/services/vpn/device_drivers/ipsec.py:506:            self.create_rpc_dispatcher(),
+    neutron/services/vpn/device_drivers/ipsec.py:507:            fanout=False)
+    neutron/services/vpn/device_drivers/ipsec.py:508:        self.conn.consume_in_thread()
+    neutron/services/vpn/device_drivers/ipsec.py:509:        self.agent_rpc = IPsecVpnDriverApi(topics.IPSEC_DRIVER_TOPIC, '1.0')
+
+    neutron/services/vpn/device_drivers/ipsec.py:515:    def create_rpc_dispatcher(self):
+    neutron/services/vpn/device_drivers/ipsec.py:516:        return q_rpc.PluginRpcDispatcher([self])
+
+Final note:
+1) The server side code gets executed (and rpc end point gets registered) as a
+   result of neutron manger loading vpn service plugin which in turn loads vpn
+   service driver from neutron config file.
+2) The agent side code gets executed (and rpc end point gets registered) as a
+   result of l3 agent loading the vpn agent manager VPNAgent, which in turn
+   loads the device driver OpenSwanDriver from vpn agent config file.
+

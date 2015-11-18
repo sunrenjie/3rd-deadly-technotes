@@ -1,0 +1,137 @@
+Change Ic642430a: Stop mock patches by default in base test class
+
+Stop mock patches by default in base test class
+
+Adds a mock.patch.stopall to the base unit test
+case cleanup routines to stop patches by default
+in unit tests. This behavior can be overwritten
+by setting an attribute on the test class if
+required.
+
+Also removes the explicit stops in the Cisco n1kv,
+VMware, and NEC unit tests to leverage the new
+automatic cleanup.
+
+Closes-Bug: #1290550
+Change-Id: Ic642430a765ea8deb07ebd88b619da58a58e0edd
+
+Change Ia8e82d6a: Removes calls to mock.patch.stopall in unit tests
+
+Removes calls to mock.patch.stopall in unit tests
+
+Removes unnecessary calls to mock.patch.stopall
+in individual unit tests since it is now
+automatically called from the base test case.
+
+Closes-Bug: #1291130
+Change-Id: Ia8e82d6a9a9bc9bd5f48146c1be53069ff1cdb01
+
+Notes:
+1. The two changes are parts of the same effort of stopping mock patches by
+   default in base test class. The second one is a post-fix of the first one.
+
+Diff:
+diff --git a/neutron/tests/base.py b/neutron/tests/base.py
+index 867357c..71b3427 100644 (file)
+--- a/neutron/tests/base.py
++++ b/neutron/tests/base.py
+@@ -23,6 +23,7 @@ import os
+ 
+ import eventlet.timeout
+ import fixtures
++import mock
+ from oslo.config import cfg
+ import testtools
+ 
+@@ -82,6 +83,7 @@ class BaseTestCase(testtools.TestCase):
+         self.useFixture(fixtures.NestedTempfile())
+         self.useFixture(fixtures.TempHomeDir())
+ 
++        self.addCleanup(mock.patch.stopall)
+         self.addCleanup(CONF.reset)
+ 
+         if os.environ.get('OS_STDOUT_CAPTURE') in TRUE_STRING:
+
+Comments:
+1.def addCleanup Found at: testtools.testcase:
+  def addCleanup(self, function, *arguments, **keywordArguments):
+    """Add a cleanup function to be called after tearDown.
+  Functions added with addCleanup will be called in reverse order of
+    adding after tearDown, or after setUp if setUp raises an exception.
+2. The stopall attribute of mock.patch is a function attribute that is defined
+   out of the function body. That's why pydev complaint of undefined variable
+   from import.
+
+   1697 
+   1698 def _patch_stopall():
+   1699     """Stop all active patches."""
+   1700     for patch in list(_patch._active_patches):
+   1701         patch.stop()
+   1702 
+   1703 
+   1704 patch.object = _patch_object
+   1705 patch.dict = _patch_dict
+   1706 patch.multiple = _patch_multiple
+   1707 patch.stopall = _patch_stopall
+   1708 patch.TEST_PREFIX = 'test'
+3. Adding 'mock.patch.stopall' to the list of cleanup function in base class
+   frees derived classes from doing so. That's why we saw plenty of removal
+   of statements 'self.addCleanup(mock.patch.stopall);' in this commit.
+4. In patch set 1, the call is condition as:
+        if getattr(self, 'auto_stop_mock_patches', True):
+            self.addCleanup(mock.patch.stopall)
+   But a reviewer comments that 'Not actually sure this is useful. Under what
+   scenario would a developer *not* want to stop mock patchers on tearDown?'
+   Then in patch set 2 the call becomes unconditional.
+
+diff --git a/neutron/tests/unit/nec/test_nec_plugin.py b/neutron/tests/unit/nec/test_nec_plugin.py
+index 310c344..78a0a79 100644 (file)
+--- a/neutron/tests/unit/nec/test_nec_plugin.py
++++ b/neutron/tests/unit/nec/test_nec_plugin.py
+@@ -85,7 +85,8 @@ class NecPluginV2TestCaseBase(object):
+             self.addCleanup(mock.patch.stopall)
+         self._set_nec_ini()
+         self.addCleanup(self._clean_nec_ini)
+-        self.patch_remote_calls(use_stop_each)
++        # kevinbenton: stopping patches is now handled in base test class
++        self.patch_remote_calls(use_stop=False)
+ 
+ 
+ class NecPluginV2TestCase(NecPluginV2TestCaseBase,
+diff --git a/neutron/tests/unit/test_servicetype.py b/neutron/tests/unit/test_servicetype.py
+index ec10ede..f3bdb1c 100644 (file)
+--- a/neutron/tests/unit/test_servicetype.py
++++ b/neutron/tests/unit/test_servicetype.py
+@@ -195,7 +195,6 @@ class ServiceTypeExtensionTestCase(ServiceTypeExtensionTestCaseBase):
+         self._patcher = mock.patch(
+             "neutron.db.servicetype_db.ServiceTypeManager",
+             autospec=True)
+-        self.addCleanup(self._patcher.stop)
+         self.mock_mgr = self._patcher.start()
+         self.mock_mgr.get_instance.return_value = self.mock_mgr.return_value
+         super(ServiceTypeExtensionTestCase, self).setUp()
+diff --git a/neutron/tests/unit/vmware/extensions/test_maclearning.py b/neutron/tests/unit/vmware/extensions/test_maclearning.py
+index cb17bf9..10a7dc1 100644 (file)
+--- a/neutron/tests/unit/vmware/extensions/test_maclearning.py
++++ b/neutron/tests/unit/vmware/extensions/test_maclearning.py
+@@ -76,8 +76,6 @@ class MacLearningDBTestCase(test_db_plugin.NeutronDbPluginV2TestCase):
+         instance.return_value.request.side_effect = self.fc.fake_request
+         cfg.CONF.set_override('metadata_mode', None, 'NSX')
+         self.addCleanup(self.fc.reset_all)
+-        self.addCleanup(self.mock_nsx.stop)
+-        self.addCleanup(patch_sync.stop)
+         self.addCleanup(self.restore_resource_attribute_map)
+         self.addCleanup(cfg.CONF.reset)
+         super(MacLearningDBTestCase, self).setUp(plugin=PLUGIN_NAME,
+diff --git a/neutron/tests/unit/vmware/test_nsx_plugin.py b/neutron/tests/unit/vmware/test_nsx_plugin.py
+index c40bd47..abcb99a 100644 (file)
+--- a/neutron/tests/unit/vmware/test_nsx_plugin.py
++++ b/neutron/tests/unit/vmware/test_nsx_plugin.py
+@@ -358,8 +358,6 @@ class SecurityGroupsTestCase(ext_sg.SecurityGroupDBTestCase):
+         patch_sync.start()
+ 
+         instance.return_value.request.side_effect = self.fc.fake_request
+-        self.addCleanup(self.mock_nsx.stop)
+-        self.addCleanup(patch_sync.stop)
+         super(SecurityGroupsTestCase, self).setUp(PLUGIN_NAME)
+

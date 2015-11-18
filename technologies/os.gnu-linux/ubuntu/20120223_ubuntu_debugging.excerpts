@@ -1,0 +1,91 @@
+
+relevent function excerpts:
+
+utouch-geis-2.1.2/libutouch-geis/geis.c:
+1118 GeisAttrType
+1119 geis_get_class_attr_type(Geis geis, GeisString attr_name)
+1120 {
+1121   GeisSize i;
+1122   for (i = 0; i < geis->class_filterable_attributes->count; ++i)
+1123   {
+1124     GeisFilterableAttribute fa = &geis->class_filterable_attributes->store[i];
+1125     if (0 == strcmp(attr_name, fa->name)) <--------------------------------------------------------------
+1126     {
+1127       return fa->type;
+1128     }
+1129   }
+1130   return GEIS_ATTR_TYPE_UNKNOWN;
+1131 }
+
+utouch-geis-2.1.2/libutouch-geis/geis_filter.c:
+380 /*
+381  * Gets the attr description by name.
+382  * @todo implement this function
+383  */
+384 static GeisAttrType
+385 _get_attr_type_for_facility(Geis               geis,
+386                             GeisFilterFacility facility,
+387                             GeisString         attr_name)
+388 {
+389   GeisAttrType type = GEIS_ATTR_TYPE_UNKNOWN;
+390   switch (facility)
+391   {
+392     case GEIS_FILTER_DEVICE:
+393       type = geis_get_device_attr_type(geis, attr_name);
+394       break;
+395     case GEIS_FILTER_CLASS:
+396       type = geis_get_class_attr_type(geis, attr_name); <------------------------------------------------
+397       break;
+398     case GEIS_FILTER_REGION:
+399       type = geis_get_region_attr_type(geis, attr_name);
+400       break;
+401     case GEIS_FILTER_SPECIAL:
+402       type = geis_get_special_attr_type(geis, attr_name);
+403       break;
+404     default:
+405       break;
+406   }
+407   return type;
+408 }
+
+411 /*
+412  * Adds zero or more terms to a filter.
+413  */
+414 GeisStatus
+415 geis_filter_add_term(GeisFilter         filter,
+416                      GeisFilterFacility facility,
+417                                         ...)
+418 {
+...
+431   va_start(varargs, facility);
+432   for (attr_name = va_arg(varargs, GeisString);
+433        attr_name;
+434        attr_name = va_arg(varargs, GeisString))
+435   {
+436     GeisAttrType attr_type = _get_attr_type_for_facility(filter->geis, <-----------------------------------
+437                                                          facility,
+438                                                          attr_name);
+
+utouch-qml-1.0.4/src/gesturearea.cpp:
+ 57 #define ADD_FILTER_TERM(filter, facility, term ...) \
+ 58   if (geis_filter_add_term((filter), (facility), \
+ 59                            ##term) != GEIS_STATUS_SUCCESS) { \
+ 60     qCritical("Failed to add term to filter"); \
+ 61     throw; \
+ 62   }
+
+ 81 void GestureArea::BuildSubscription(Gesture* gesture) {
+...
+177   ADD_FILTER_TERM(filter,
+178                   GEIS_FILTER_CLASS,
+179                   GEIS_CLASS_ATTRIBUTE_NAME,
+180                   GEIS_FILTER_OP_EQ,
+181                   primitive,
+182                   NULL);
+183   ADD_FILTER_TERM(filter, <--------------------------------------------------------------------------------
+184                   GEIS_FILTER_CLASS,
+185                   GEIS_GESTURE_ATTRIBUTE_TOUCHES,
+186                   GEIS_FILTER_OP_EQ,
+187                   gesture->touches()->start()); <------------------------------- XXX: This might be a bug; missing NULL, see http://developer.ubuntu.com/api/ubuntu-11.10/cplusplus/utouch-geis/group__geis__v2__filter.html#ga7ebde8cc7e2a4f34627e4ef4ad15a2c6
+
+

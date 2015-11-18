@@ -1,0 +1,18 @@
+
+unix.history created @ 20120525
+
+Several of the well-known ancient UNIX version
++ Version 6
++ Version 7
+  + These are the research UNIX versions, whose authors went on to create Plan9.
++ System III
+  + This is a version released by AT&T's Unix Support Group (USG).
++ System V Release 1
++ System V Release 2
+  + This version is released at April, 1984.
+  + Maurice J. Bach's The Design of the UNIX Operating System is the definitive
+    description of the System V Release 2 kernel.
++ System V Release 3
++ System V Release 4
+  + A joint project of Unix System Laboratories and Sun Microsystems, it
+    combined technology from Release 3 as well as 4.3BSD, Xenix, and SunOS.

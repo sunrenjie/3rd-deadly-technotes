@@ -1,0 +1,168 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>20140303-Ia3c6ce18-OVS-lib-defer-apply-doesnt-handle-concurrency.html</title>
+<meta name="Generator" content="Vim/7.3">
+<meta name="plugin-version" content="vim7.3_v6">
+<meta name="syntax" content="git">
+<meta name="settings" content="use_css,number_lines">
+<style type="text/css">
+<!--
+pre { font-family: monospace; color: #000000; background-color: #ffffff; }
+body { font-family: monospace; color: #000000; background-color: #ffffff; }
+.lnr { color: #af5f00; }
+.PreProc { color: #c000c0; }
+.Type { color: #008000; }
+.Special { color: #c000c0; }
+.Constant { color: #c00000; }
+.Identifier { color: #008080; }
+.Statement { color: #af5f00; }
+.comment {
+  font-weight: bold;
+  font-size: 16px;
+  background: #00FF00;
+}
+.defect {
+  font-weight: bold;
+  font-size: 16px;
+  background: #FF00FF;
+}
+
+-->
+</style>
+</head>
+<body>
+<span Class="Statement">NOTES</span>
+<ol>
+<li>
+<pre><span Class="Statement">[Summary]</span> This commit fixes a in-cache-race-condition problem. We
+elaborate it throughly here because it demonstrates the usage of mock in
+testing.</pre>
+</li>
+<li>
+<pre><span Class="Statement">[Context]</span> Deferring of modifications to flows (via call to run_ofctl)
+is implemented such that when deferring is enabled, modification commands
+are cached in an instance variable; when deferring is disabled, the cached
+commands are taken from the cache variable and executed. The idea is OK.
+However, the implementation is not thread-safe: when cached commands are
+applied, if new commands are added to the cache at the same time, they are
+lost.</pre>
+</li>
+<li>
+<pre><span Class="Statement">[Method]</span> This fix changes defer_apply_off() such that when deferring is
+disabled, the cached commands are stashed from the cache variable to a
+local variable atomically; later processing and execution of the cached
+commands are totally local, effectively avoiding race conditions.</pre>
+</li>
+</ol>
+<hr>
+<pre>
+<span class="lnr">  1 </span><span class="Statement">commit</span> <span class="Identifier">501213686886baccd3280e10b8856a25d3517519</span>
+<span class="lnr">  2 </span><span class="Statement">Author:</span> <span class="Constant">Édouard Thuleau </span><span class="Special">&lt;</span><span class="Special">edouard.thuleau@cloudwatt.com</span><span class="Special">&gt;</span>
+<span class="lnr">  3 </span><span class="Statement">Date:</span>   <span class="Constant">Mon Mar 3 18:08:33 2014 +0100</span>
+<span class="lnr">  4 </span>
+<span class="lnr">  5 </span>    OVS lib defer apply doesn't handle concurrency
+<span class="lnr">  6 </span>
+<span class="lnr">  7 </span>    The OVS lib deferred apply methods use a dict to save flows to add,
+<span class="lnr">  8 </span>    modify or delete when deffered apply is switched off.
+<span class="lnr">  9 </span>    If another thread adds, modifies or deletes flows on that dict during
+<span class="lnr"> 10 </span>    another <a class="defect" title="This errorous wording is left unfixed.">process</a> called deffered_apply_off, its flows could be ignored.
+<span class="lnr"> 11 </span>
+<span class="lnr"> 12 </span>    This fix stash reference flows list and point the flows list to a new
+<span class="lnr"> 13 </span>    cleared flows list. Then, it applies flows from the stashed flows list.
+<span class="lnr"> 14 </span>
+<span class="lnr"> 15 </span>    Closes-bug: #1263866
+<span class="lnr"> 16 </span>    Change-Id: Ia3c6ce181e1599d1474da7eb944feff7d84f1d73
+<span class="lnr"> 17 </span>---
+<span class="lnr"> 18 </span> neutron/agent/linux/ovs_lib.py                 | 11 ++++++++---
+<span class="lnr"> 19 </span> neutron/tests/unit/agent/linux/test_ovs_lib.py | 44 ++++++++++++++++++++++++++++++++++++++++++++
+<span class="lnr"> 20 </span> 2 files changed, 52 insertions(+), 3 deletions(-)
+<span class="lnr"> 21 </span>
+<span class="lnr"> 22 </span><span class="Type">diff --git a/neutron/agent/linux/ovs_lib.py b/neutron/agent/linux/ovs_lib.py</span>
+<span class="lnr"> 23 </span>index 2072183..5caa420 100644
+<span class="lnr"> 24 </span><span class="Type">--- a/neutron/agent/linux/ovs_lib.py</span>
+<span class="lnr"> 25 </span><span class="Type">+++ b/neutron/agent/linux/ovs_lib.py</span>
+<span class="lnr"> 26 </span><span class="Statement">@@ -208,7 +208,14 @@</span><span class="PreProc"> class OVSBridge(BaseOVS):</span>
+<span class="lnr"> 27 </span>
+<span class="lnr"> 28 </span>     def defer_apply_off(self):
+<span class="lnr"> 29 </span>         LOG.debug(_('defer_apply_off'))
+<span class="lnr"> 30 </span><span class="Special">-        for action, flows in self.deferred_flows.items():</span>
+<span class="lnr"> 31 </span><span class="Identifier">+        # Note(ethuleau): stash flows and disable deferred mode. Then apply</span>
+<span class="lnr"> 32 </span><span class="Identifier">+        # flows from the stashed reference to be sure to not purge flows that</span>
+<span class="lnr"> 33 </span><span class="Identifier">+        # were added between two ofctl commands.</span>
+<span class="lnr"> 34 </span><span class="Identifier">+        <a class="comment" title="It is guaranteed that the r-values are evaluated simultaneously and the l-values get their values simultaneously and atomically.">stashed_deferred_flows, self.deferred_flows = (</a></span>
+<span class="lnr"> 35 </span><span class="Identifier">+            self.deferred_flows, {'add': '', 'mod': '', 'del': ''}</span>
+<span class="lnr"> 36 </span><span class="Identifier">+        )</span>
+<span class="lnr"> 37 </span><span class="Identifier">+        self.defer_apply_flows = False</span>
+<span class="lnr"> 38 </span><span class="Identifier">+        for action, flows in stashed_deferred_flows.items():</span>
+<span class="lnr"> 39 </span>             if flows:
+<span class="lnr"> 40 </span>                 LOG.debug(_('Applying following deferred flows '
+<span class="lnr"> 41 </span>                             'to bridge %s'), self.br_name)
+<span class="lnr"> 42 </span><span class="Statement">@@ -216,8 +223,6 @@</span><span class="PreProc"> class OVSBridge(BaseOVS):</span>
+<span class="lnr"> 43 </span>                     LOG.debug(_('%(action)s: %(flow)s'),
+<span class="lnr"> 44 </span>                               {'action': action, 'flow': line})
+<span class="lnr"> 45 </span>                 self.run_ofctl('%s-flows' % action, ['-'], flows)
+<span class="lnr"> 46 </span><span class="Special">-        self.defer_apply_flows = False</span>
+<span class="lnr"> 47 </span><span class="Special">-        self.deferred_flows = {'add': '', 'mod': '', 'del': ''}</span>
+<span class="lnr"> 48 </span>
+<span class="lnr"> 49 </span>     def add_tunnel_port(self, port_name, remote_ip, local_ip,
+<span class="lnr"> 50 </span>                         tunnel_type=p_const.TYPE_GRE,
+<span class="lnr"> 51 </span><span class="Type">diff --git a/neutron/tests/unit/agent/linux/test_ovs_lib.py b/neutron/tests/unit/agent/linux/test_ovs_lib.py</span>
+<span class="lnr"> 52 </span>index 96a7e8e..4b42317 100644
+<span class="lnr"> 53 </span><span class="Type">--- a/neutron/tests/unit/agent/linux/test_ovs_lib.py</span>
+<span class="lnr"> 54 </span><span class="Type">+++ b/neutron/tests/unit/agent/linux/test_ovs_lib.py</span>
+<span class="lnr"> 55 </span><span class="Statement">@@ -407,6 +407,50 @@</span><span class="PreProc"> class OVS_Lib_Test(base.BaseTestCase):</span>
+<span class="lnr"> 56 </span>             mock.call('del-flows', ['-'], 'deleted_flow_1\n')
+<span class="lnr"> 57 </span>         ])
+<span class="lnr"> 58 </span>
+<span class="lnr"> 59 </span><span class="Identifier">+    def <a class="comment" title="This function testifies that at race conditions, both _build_flow_expr_str() and run_ofctl() are called properly without losing any flow commands.">test_defer_apply_flows_concurrently(self)</a>:</span>
+<span class="lnr"> 60 </span><span class="Identifier">+        flow_expr = mock.patch.object(ovs_lib, '_build_flow_expr_str').start()</span>
+<span class="lnr"> 61 </span><span class="Identifier">+        flow_expr.side_effect = <a class="comment" title="Strings in this list are emitted sequentially for each mock call so that assertEqual() works.">[</a>'added_flow_1', 'deleted_flow_1',</span>
+<span class="lnr"> 62 </span><span class="Identifier">+                                 'modified_flow_1', 'added_flow_2',</span>
+<span class="lnr"> 63 </span><span class="Identifier">+                                 'deleted_flow_2', 'modified_flow_2']</span>
+<span class="lnr"> 64 </span><span class="Identifier">+</span>
+<span class="lnr"> 65 </span><span class="Identifier">+        run_ofctl = mock.patch.object(self.br, 'run_ofctl').start()</span>
+<span class="lnr"> 66 </span><span class="Identifier">+</span>
+<span class="lnr"> 67 </span><span class="Identifier">+        def <a class="comment" title="This side-effect function emulates race condition by adding additional flows during the call to run_ofctl(); in order to do that, it has the exact calling interface as run_ofctl().">run_ofctl_fake(cmd, args, process_input=None)</a>:</span>
+<span class="lnr"> 68 </span><span class="Identifier">+            self.br.defer_apply_on()</span>
+<span class="lnr"> 69 </span><span class="Identifier">+            if cmd == 'add-flows':</span>
+<span class="lnr"> 70 </span><span class="Identifier">+                self.br.add_flow(flow='added_flow_2')</span>
+<span class="lnr"> 71 </span><span class="Identifier">+            elif cmd == 'del-flows':</span>
+<span class="lnr"> 72 </span><span class="Identifier">+                self.br.delete_flows(flow='deleted_flow_2')</span>
+<span class="lnr"> 73 </span><span class="Identifier">+            elif cmd == 'mod-flows':</span>
+<span class="lnr"> 74 </span><span class="Identifier">+                self.br.mod_flow(flow='modified_flow_2')</span>
+<span class="lnr"> 75 </span><span class="Identifier">+        run_ofctl.side_effect = run_ofctl_fake</span>
+<span class="lnr"> 76 </span><span class="Identifier">+</span>
+<span class="lnr"> 77 </span><span class="Identifier">+        self.br.defer_apply_on()</span>
+<span class="lnr"> 78 </span><span class="Identifier">+        self.br.add_flow(flow='added_flow_1')</span>
+<span class="lnr"> 79 </span><span class="Identifier">+        self.br.delete_flows(flow='deleted_flow_1')</span>
+<span class="lnr"> 80 </span><span class="Identifier">+        self.br.mod_flow(flow='modified_flow_1')</span>
+<span class="lnr"> 81 </span><span class="Identifier">+        <a class="comment" title="During this call, run_ofctl_fake() inserts three flow commands; previously they are silently lost (which is THE bug being fixed), now they should be stored in cache.">self.br.defer_apply_off()</a></span>
+<span class="lnr"> 82 </span><span class="Identifier">+</span>
+<span class="lnr"> 83 </span><span class="Identifier">+        run_ofctl.side_effect = None</span>
+<span class="lnr"> 84 </span><span class="Identifier">+        <a class="comment" title="Now the flow commands inserted above shall be executed.">self.br.defer_apply_off()</a></span>
+<span class="lnr"> 85 </span><span class="Identifier">+</span>
+<span class="lnr"> 86 </span><span class="Identifier">+        flow_expr.assert_has_calls([</span>
+<span class="lnr"> 87 </span><span class="Identifier">+            mock.call({'flow': 'added_flow_1'}, 'add'),</span>
+<span class="lnr"> 88 </span><span class="Identifier">+            mock.call({'flow': 'deleted_flow_1'}, 'del'),</span>
+<span class="lnr"> 89 </span><span class="Identifier">+            mock.call({'flow': 'modified_flow_1'}, 'mod'),</span>
+<span class="lnr"> 90 </span><span class="Identifier">+            mock.call({'flow': 'added_flow_2'}, 'add'),</span>
+<span class="lnr"> 91 </span><span class="Identifier">+            mock.call({'flow': 'deleted_flow_2'}, 'del'),</span>
+<span class="lnr"> 92 </span><span class="Identifier">+            mock.call({'flow': 'modified_flow_2'}, 'mod')</span>
+<span class="lnr"> 93 </span><span class="Identifier">+        ])</span>
+<span class="lnr"> 94 </span><span class="Identifier">+        run_ofctl.assert_has_calls([</span>
+<span class="lnr"> 95 </span><span class="Identifier">+            mock.call('add-flows', ['-'], 'added_flow_1\n'),</span>
+<span class="lnr"> 96 </span><span class="Identifier">+            mock.call('del-flows', ['-'], 'deleted_flow_1\n'),</span>
+<span class="lnr"> 97 </span><span class="Identifier">+            mock.call('mod-flows', ['-'], 'modified_flow_1\n'),</span>
+<span class="lnr"> 98 </span><span class="Identifier">+            mock.call('add-flows', ['-'], 'added_flow_2\n'),</span>
+<span class="lnr"> 99 </span><span class="Identifier">+            mock.call('del-flows', ['-'], 'deleted_flow_2\n'),</span>
+<span class="lnr">100 </span><span class="Identifier">+            mock.call('mod-flows', ['-'], 'modified_flow_2\n')</span>
+<span class="lnr">101 </span><span class="Identifier">+        ])</span>
+<span class="lnr">102 </span><span class="Identifier">+</span>
+<span class="lnr">103 </span>     def test_add_tunnel_port(self):
+<span class="lnr">104 </span>         pname = &quot;tap99&quot;
+<span class="lnr">105 </span>         local_ip = &quot;1.1.1.1&quot;
+</pre>
+</body>
+</html>

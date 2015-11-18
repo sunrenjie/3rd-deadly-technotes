@@ -1,0 +1,8 @@
+
+QUESTIONS that are yet to be answered
+
+How are functions performing database transactions tested? In test
+environment, database is not available. Example:
+neutron/tests/unit/db/test_quota_db.py.
+
+

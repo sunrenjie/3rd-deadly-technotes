@@ -1,0 +1,105 @@
+
+GRUB and GRUB2 related info @ 20141217
+
+[TIPS]
+
+1. How to load grub2 from legacy grub (e.g., grldr for Windows XP/2003)?
+   Solution: at grldr command line prompt, enter:
+   kernel (hdx,y)/path/to/core.img
+   boot
+
+2. How to load Windows from a non-first drive?
+   Solutions (assuming the Windows is in the 3rd drive, partition 1):
+   grub1:
+     map (hd2) (hd0)
+     root (hd2,0)
+     chainloader +1
+     boot
+   grub2:
+     drivemap (hd2) (hd0)
+     set root=(hd2,msdos1)
+     chainloader +1
+     boot
+
+================================================================================
+HOWTO: Installing "Fedora 20" to PC with grldr:
+
+1. Fetch the installation disc iso image file, place it in a fat/ext file
+   system [1] [4].
+2. From the iso file, extract isolinux dir and place vmlinuz* and initrd* to
+   somewhere that can be find by grldr [4].
+3. At grldr command line prompt, enter:
+   kernel (hdx,y)/path/to/vmlinuz repo=hd:/dev/sda5:/ [2]
+   initrd (hdx,y)/path/to/initrd
+   boot
+
+NOTES:
+1. Supported file system for placing of the iso image file is msdos fat, linux
+   ext. This indicates that if the iso file is larger than 4GB, the only choice
+   will be linux ext. Mysteriously, the NTFS driver is included in the initrd,
+   yet placing iso file on NTFS is not supported.
+2. Other options may be needed based on trial-and-error tests. For example, on
+   HP Proliant DL380G6, 'modprobe.blacklist=cnic,bnx2i' is required.
+3. Support of this method for installation on Fedora 21 is partial and yet to
+   be thoroughly tested. Apparently, the support for 'repo' is the result of
+   right vmlinuz/initrd and iso image file.
+4. Currently, the combination of setup files that tests to work is: isolinux
+   from Server 21 disc with the iso image from Gnome Live 21 disc (image name:
+   'Fedora-Live-Workstation-x86_64-21-5.iso'). Chances are that other
+   combinations may work.
+
+================================================================================
+HOWTO: Installing "Fedora 20" to PC with grub2:
+
+0. Reserver empty disk spaces and back up everything.
+1. Have grub2 installed.
+2. Get the installation ISO file and put it to some place in the file system.
+3. Either a) create a grub2 entry containing the following or b) type the
+   commands in the curly braces manually at grub2 prompt. Note that the
+   partition string shall be customized according to your configurations.
+4. The installation begins.
+
+menuentry "Fedora 20 (DVD)" {
+ insmod loopback
+ insmod iso9660
+ set isofile="/Fedora-15-x86_64-DVD.iso"
+ loopback loop (hd0,2)$isofile
+ linux (loop)/isolinux/vmlinuz repo=hd:/dev/sda6:/
+ initrd (loop)/isolinux/initrd.img
+}
+
+References:
+1. http://rajeeshknambiar.wordpress.com/2013/01/21/fedora-18-install-from-iso-file/
+2. http://forums.fedoraforum.org/showthread.php?t=263654
+
+===============================================================================
+HOWTO: Loading Windows PE ISO and DOS IMG files with grub 1 (including grldr):
+
+For ISO images:
+map --mem /path/to/image.iso (hd32)
+map --hook
+chainloader (hd32)
+boot
+
+For DOS images:
+map --mem /path/to/image.img (fd0)
+map --hook
+chainloader (fd0)+1
+rootnoverify (fd0)
+boot
+
+Note the difference in the chainloader command and the IMG-only rootnoverify
+command.
+
+===============================================================================
+HOWTO: fix grub2 on partition table changes (Fedora 21):
+
+Firstly, it is assumed that the relevant file systems remain intact (only
+partition table and hence device names changed).
+
+1. Boot LiveCD (see instructions above); mount the root filesystem (say /mnt).
+2. Validate entries in /etc/fstab, especially UUIDs.
+3. Re-install grub:
+   grub-install --root-directory=/mnt /dev/sdX
+   (where /dev/sdX is the device path of the disk)
+4. grub2-mkconfig -o /mnt/boot/grub2/grub.cfg

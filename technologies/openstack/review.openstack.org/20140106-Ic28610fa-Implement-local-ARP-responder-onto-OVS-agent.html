@@ -1,0 +1,809 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>~/git/notes/technologies/openstack/review.openstack.org/20140106-Ic28610fa-Implement-local-ARP-responder-onto-OVS-agent.html</title>
+<meta name="Generator" content="Vim/7.3">
+<meta name="plugin-version" content="vim7.3_v10">
+<meta name="syntax" content="git">
+<meta name="settings" content="number_lines,use_css,pre_wrap,expand_tabs">
+<style type="text/css">
+<!--
+pre { font-family: monospace; color: #000000; background-color: #ffffff; }
+body { font-family: monospace; color: #000000; background-color: #ffffff; }
+.lnr { color: #af5f00; }
+.PreProc { color: #c000c0; }
+.Type { color: #008000; }
+.Special { color: #c000c0; }
+.Constant { color: #c00000; }
+.Identifier { color: #008080; }
+.Statement { color: #af5f00; }
+.comment {
+  font-weight: bold;
+  font-size: 16px;
+  background: #00FF00;
+}
+.defect {
+  font-weight: bold;
+  font-size: 16px;
+  background: #FF00FF;
+}
+
+-->
+</style>
+</head>
+<body>
+<span class="Statement">Note:</span>
+<ol>
+<li>
+<pre><span class="Statement">[context]</span> The l2-pop mechanism driver optimizes the VM network by making the
+vm port info available to all ovs agents, avoiding broadcasting in terms of
+communications among the compute nodes. But unnecessary broadcasting still
+occurs as the VMs are not notified.</li>
+<li>
+<pre><span class="Statement">[summary]</span> This change optimizes further by implementing local ARP responser
+in OVS flow logic, avoiding broadcasting in terms of communications among the
+VMs. Such feature relies upon new feature of OVS since 2.1.
+</li>
+<li>
+<pre><span class="Statement">[addition info]</span> This commit is very well elaborated in blog post
+<a href="http://assafmuller.wordpress.com/2014/05/21/ovs-arp-responder-theory-and-practice/">http://assafmuller.wordpress.com/2014/05/21/ovs-arp-responder-theory-and-practice/</a>
+For Open vSwitch basics, see blog post
+<a href="http://assafmuller.wordpress.com/2013/10/13/open-vswitch-basics/">http://assafmuller.wordpress.com/2013/10/13/open-vswitch-basics/</a>
+For l2-pop mechanism driver, see blog post
+<a href="http://assafmuller.wordpress.com/2014/02/23/ml2-address-population/">http://assafmuller.wordpress.com/2014/02/23/ml2-address-population/</a>
+</li>
+</ol>
+<hr>
+<pre>
+<span class="lnr">  1 </span><span class="Statement">commit</span> <span class="Identifier">befa0b9184eb0c6248d06efa5b02be8217f1722e</span>
+<span class="lnr">  2 </span><span class="Statement">Author:</span> <span class="Constant">Édouard Thuleau </span><span class="Special">&lt;</span><span class="Special">edouard.thuleau@cloudwatt.com</span><span class="Special">&gt;</span>
+<span class="lnr">  3 </span><span class="Statement">Date:</span>   <span class="Constant">Mon Jan 6 13:58:39 2014 +0100</span>
+<span class="lnr">  4 </span>
+<span class="lnr">  5 </span>    Implement local ARP responder onto OVS agent
+<span class="lnr">  6 </span>
+<span class="lnr">  7 </span>    With ML2 plugin and l2-pop mechanism driver, it's possible to locally
+<span class="lnr">  8 </span>    answer to the ARP request of the VM and avoid ARP broadcasting emulation
+<span class="lnr">  9 </span>    on overlay which is costly.
+<span class="lnr"> 10 </span>
+<span class="lnr"> 11 </span>    When this functionality is enabled, the OVS flows logic evolves to [1].
+<span class="lnr"> 12 </span>    This functionality was introduce in 2.1 OVS branch [2].
+<span class="lnr"> 13 </span>
+<span class="lnr"> 14 </span>    A README is added to describe l2-pop mechanism driver and the agents
+<span class="lnr"> 15 </span>    particularities.
+<span class="lnr"> 16 </span>
+<span class="lnr"> 17 </span>    [1] <a href="https://wiki.openstack.org/wiki/Ovs-flow-logic#OVS_flows_logic_with_local_ARP_responder">https://wiki.openstack.org/wiki/Ovs-flow-logic#OVS_flows_logic_with_local_ARP_responder</a>
+<span class="lnr"> 18 </span>    [2] <a href="http://git.openvswitch.org/cgi-bin/gitweb.cgi?p=openvswitch;a=commitdiff;h=f6c8a6b163af343c66aea54953553d84863835f7">http://git.openvswitch.org/cgi-bin/gitweb.cgi?p=openvswitch;a=commitdiff;h=f6c8a6b163af343c66aea54953553d84863835f7</a>
+<span class="lnr"> 19 </span>
+<span class="lnr"> 20 </span>    DocImpact: New OVS agent flag 'arp_responder' set to false by default
+<span class="lnr"> 21 </span>    Closes-Bug: #1237427
+<span class="lnr"> 22 </span>    Change-Id: Ic28610faf2df6566d8d876fcd7aed333647970e2
+<span class="lnr"> 23 </span>---
+<span class="lnr"> 24 </span> etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini   |    5 +++++
+<span class="lnr"> 25 </span> neutron/agent/linux/ovs_lib.py                           |   24 ++++++++++++++++++++++++
+<span class="lnr"> 26 </span> neutron/common/utils.py                                  |   17 +++++++++++++++++
+<span class="lnr"> 27 </span> neutron/plugins/ml2/drivers/l2pop/README                 |   41 +++++++++++++++++++++++++++++++++++++++++
+<span class="lnr"> 28 </span> neutron/plugins/openvswitch/agent/ovs_neutron_agent.py   |  135 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----
+<span class="lnr"> 29 </span> neutron/plugins/openvswitch/common/config.py             |    2 ++
+<span class="lnr"> 30 </span> neutron/plugins/openvswitch/common/constants.py          |    4 +++-
+<span class="lnr"> 31 </span> neutron/tests/unit/agent/linux/test_ovs_lib.py           |   32 ++++++++++++++++++++++++++++++++
+<span class="lnr"> 32 </span> neutron/tests/unit/openvswitch/test_ovs_defaults.py      |    2 ++
+<span class="lnr"> 33 </span> neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py |  101 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------
+<span class="lnr"> 34 </span> neutron/tests/unit/openvswitch/test_ovs_tunnel.py        |   47 ++++++++++++++++++++++++++++++++++++++++++++---
+<span class="lnr"> 35 </span> 11 files changed, 386 insertions(+), 24 deletions(-)
+<span class="lnr"> 36 </span>
+<span class="lnr"> 37 </span><span class="Type">diff --git a/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini b/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini</span>
+<span class="lnr"> 38 </span>index 50ec556..1718d4d 100644
+<span class="lnr"> 39 </span><span class="Type">--- a/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini</span>
+<span class="lnr"> 40 </span><span class="Type">+++ b/etc/neutron/plugins/openvswitch/ovs_neutron_plugin.ini</span>
+<span class="lnr"> 41 </span><span class="Statement">@@ -128,6 +128,11 @@</span>
+<span class="lnr"> 42 </span> #
+<span class="lnr"> 43 </span> # l2_population = False
+<span class="lnr"> 44 </span>
+<span class="lnr"> 45 </span><span class="Identifier">+# Enable local ARP responder. Requires OVS 2.1. This is only used by the l2</span>
+<span class="lnr"> 46 </span><span class="Identifier">+# population ML2 MechanismDriver.</span>
+<span class="lnr"> 47 </span><span class="Identifier">+#</span>
+<span class="lnr"> 48 </span><span class="Identifier">+# <a class="comment" title="We may need to add this to plugin.ini/ml2_conf.ini in real world deployment.">arp_responder = False</a></span>
+<span class="lnr"> 49 </span><span class="Identifier">+</span>
+<span class="lnr"> 50 </span> [securitygroup]
+<span class="lnr"> 51 </span> # Firewall driver for realizing neutron security group function.
+<span class="lnr"> 52 </span> # firewall_driver = neutron.agent.firewall.NoopFirewallDriver
+<span class="lnr"> 53 </span><span class="Type">diff --git a/neutron/agent/linux/ovs_lib.py b/neutron/agent/linux/ovs_lib.py</span>
+<span class="lnr"> 54 </span>index 5caa420..97e9af2 100644
+<span class="lnr"> 55 </span><span class="Type">--- a/neutron/agent/linux/ovs_lib.py</span>
+<span class="lnr"> 56 </span><span class="Type">+++ b/neutron/agent/linux/ovs_lib.py</span>
+<span class="lnr"> 57 </span><span class="Statement">@@ -22,6 +22,7 @@</span><span class="PreProc"> from oslo.config import cfg</span>
+<span class="lnr"> 58 </span> from neutron.agent.linux import ip_lib
+<span class="lnr"> 59 </span> from neutron.agent.linux import utils
+<span class="lnr"> 60 </span> from neutron.common import exceptions
+<span class="lnr"> 61 </span><span class="Identifier">+from neutron.common import utils as common_utils</span>
+<span class="lnr"> 62 </span> from neutron.openstack.common import excutils
+<span class="lnr"> 63 </span> from neutron.openstack.common import jsonutils
+<span class="lnr"> 64 </span> from neutron.openstack.common import log as logging
+<span class="lnr"> 65 </span><span class="Statement">@@ -586,3 +587,26 @@</span><span class="PreProc"> def _build_flow_expr_str(flow_dict, cmd):</span>
+<span class="lnr"> 66 </span>         flow_expr_arr.append(actions)
+<span class="lnr"> 67 </span>
+<span class="lnr"> 68 </span>     return ','.join(flow_expr_arr)
+<span class="lnr"> 69 </span><span class="Identifier">+</span>
+<span class="lnr"> 70 </span><span class="Identifier">+</span>
+<span class="lnr"> 71 </span><span class="Identifier">+def ofctl_arg_supported(root_helper, cmd, args):</span>
+<span class="lnr"> 72 </span><span class="Identifier">+    '''Verify if ovs-ofctl binary supports command with specific args.</span>
+<span class="lnr"> 73 </span><span class="Identifier">+</span>
+<span class="lnr"> 74 </span><span class="Identifier">+    :param root_helper: utility to use when running shell cmds.</span>
+<span class="lnr"> 75 </span><span class="Identifier">+    :param cmd: ovs-vsctl command to use for test.</span>
+<span class="lnr"> 76 </span><span class="Identifier">+    :param args: arguments to test with command.</span>
+<span class="lnr"> 77 </span><span class="Identifier">+    :returns: a boolean if the args supported.</span>
+<span class="lnr"> 78 </span><span class="Identifier">+    '''</span>
+<span class="lnr"> 79 </span><span class="Identifier">+    supported = True</span>
+<span class="lnr"> 80 </span><span class="Identifier">+    br_name = 'br-test-%s' % common_utils.<a class="comment" title="Random bridge name leads to less oppotunity of conflicts.">get_random_string(6)</a></span>
+<span class="lnr"> 81 </span><span class="Identifier">+    test_br = OVSBridge(br_name, root_helper)</span>
+<span class="lnr"> 82 </span><span class="Identifier">+    test_br.reset_bridge()</span>
+<span class="lnr"> 83 </span><span class="Identifier">+</span>
+<span class="lnr"> 84 </span><span class="Identifier">+    full_args = [&quot;ovs-ofctl&quot;, cmd, test_br.br_name] + args</span>
+<span class="lnr"> 85 </span><span class="Identifier">+    try:</span>
+<span class="lnr"> 86 </span><span class="Identifier">+        utils.execute(full_args, root_helper=root_helper)</span>
+<span class="lnr"> 87 </span><span class="Identifier">+    except Exception:</span>
+<span class="lnr"> 88 </span><span class="Identifier">+        supported = False</span>
+<span class="lnr"> 89 </span><span class="Identifier">+</span>
+<span class="lnr"> 90 </span><span class="Identifier">+    test_br.destroy()</span>
+<span class="lnr"> 91 </span><span class="Identifier">+    return supported</span>
+<span class="lnr"> 92 </span><span class="Type">diff --git a/neutron/common/utils.py b/neutron/common/utils.py</span>
+<span class="lnr"> 93 </span>index d72a3ed..5b0d38a 100644
+<span class="lnr"> 94 </span><span class="Type">--- a/neutron/common/utils.py</span>
+<span class="lnr"> 95 </span><span class="Type">+++ b/neutron/common/utils.py</span>
+<span class="lnr"> 96 </span><span class="Statement">@@ -18,8 +18,11 @@</span>
+<span class="lnr"> 97 </span>
+<span class="lnr"> 98 </span> &quot;&quot;&quot;Utilities and helper functions.&quot;&quot;&quot;
+<span class="lnr"> 99 </span>
+<span class="lnr">100 </span><span class="Identifier">+import datetime</span>
+<span class="lnr">101 </span><span class="Identifier">+import hashlib</span>
+<span class="lnr">102 </span> import logging as std_logging
+<span class="lnr">103 </span> import os
+<span class="lnr">104 </span><span class="Identifier">+import random</span>
+<span class="lnr">105 </span> import signal
+<span class="lnr">106 </span> import socket
+<span class="lnr">107 </span>
+<span class="lnr">108 </span><span class="Statement">@@ -199,3 +202,17 @@</span><span class="PreProc"> def log_opt_values(log):</span>
+<span class="lnr">109 </span>
+<span class="lnr">110 </span> def is_valid_vlan_tag(vlan):
+<span class="lnr">111 </span>     return q_const.MIN_VLAN_TAG &lt;= vlan &lt;= q_const.MAX_VLAN_TAG
+<span class="lnr">112 </span><span class="Identifier">+</span>
+<span class="lnr">113 </span><span class="Identifier">+</span>
+<span class="lnr">114 </span><span class="Identifier">+def <a class="comment" title="This impl. is extraordinary.">get_random_string(length)</a>:</span>
+<span class="lnr">115 </span><span class="Identifier">+    &quot;&quot;&quot;Get a random hex string of the specified length.</span>
+<span class="lnr">116 </span><span class="Identifier">+</span>
+<span class="lnr">117 </span><span class="Identifier">+    based on Cinder library</span>
+<span class="lnr">118 </span><span class="Identifier">+      cinder/transfer/api.py</span>
+<span class="lnr">119 </span><span class="Identifier">+    &quot;&quot;&quot;</span>
+<span class="lnr">120 </span><span class="Identifier">+    rndstr = &quot;&quot;</span>
+<span class="lnr">121 </span><span class="Identifier">+    random.seed(datetime.datetime.now().microsecond)</span>
+<span class="lnr">122 </span><span class="Identifier">+    while len(rndstr) &lt; length:</span>
+<span class="lnr">123 </span><span class="Identifier">+        rndstr += hashlib.sha224(str(random.random())).hexdigest()</span>
+<span class="lnr">124 </span><span class="Identifier">+</span>
+<span class="lnr">125 </span><span class="Identifier">+    return rndstr[0:length]</span>
+<span class="lnr">126 </span><span class="Type">diff --git a/neutron/plugins/ml2/drivers/l2pop/README b/neutron/plugins/ml2/drivers/<a class="comment" title="The much needed and much delayed README for l2pop.">l2pop/README</a></span>
+<span class="lnr">127 </span>new file mode 100644
+<span class="lnr">128 </span>index 0000000..46bb27e
+<span class="lnr">129 </span><span class="Type">--- /dev/null</span>
+<span class="lnr">130 </span><span class="Type">+++ b/neutron/plugins/ml2/drivers/l2pop/README</span>
+<span class="lnr">131 </span><span class="Statement">@@ -0,0 +1,41 @@</span>
+<span class="lnr">132 </span><span class="Identifier">+Neutron ML2 l2 population Mechanism Drivers</span>
+<span class="lnr">133 </span><span class="Identifier">+</span>
+<span class="lnr">134 </span><span class="Identifier">+l2 population (l2pop) mechanism drivers implements the ML2 driver to improve</span>
+<span class="lnr">135 </span><span class="Identifier">+open source plugins overlay implementations (VXLAN with Linux bridge and</span>
+<span class="lnr">136 </span><span class="Identifier">+GRE/VXLAN with OVS). This mechanism driver is implemented in ML2 to propagate</span>
+<span class="lnr">137 </span><span class="Identifier">+the forwarding information among agents using a common RPC API.</span>
+<span class="lnr">138 </span><span class="Identifier">+</span>
+<span class="lnr">139 </span><span class="Identifier">+More informations could be found on the wiki page [1].</span>
+<span class="lnr">140 </span><span class="Identifier">+</span>
+<span class="lnr">141 </span><span class="Identifier">+VXLAN Linux kernel:</span>
+<span class="lnr">142 </span><span class="Identifier">+-------------------</span>
+<span class="lnr">143 </span><span class="Identifier">+The VXLAN Linux kernel module provide all necessary functionalities to populate</span>
+<span class="lnr">144 </span><span class="Identifier">+the forwarding table and local ARP responder tables. This module appears on</span>
+<span class="lnr">145 </span><span class="Identifier">+release 3.7 of the vanilla Linux kernel in experimental:</span>
+<span class="lnr">146 </span><span class="Identifier">+- 3.8: first stable release, no edge replication (multicast necessary),</span>
+<span class="lnr">147 </span><span class="Identifier">+- 3.9: edge replication only for the broadcasted packets,</span>
+<span class="lnr">148 </span><span class="Identifier">+- 3.11: edge replication for broadcast, multicast and unknown packets.</span>
+<span class="lnr">149 </span><span class="Identifier">+</span>
+<span class="lnr">150 </span><span class="Identifier">+Note: Some distributions (like RHEL) have backported this module on precedent</span>
+<span class="lnr">151 </span><span class="Identifier">+      kernel version.</span>
+<span class="lnr">152 </span><span class="Identifier">+</span>
+<span class="lnr">153 </span><span class="Identifier">+OpenvSwitch:</span>
+<span class="lnr">154 </span><span class="Identifier">+------------</span>
+<span class="lnr">155 </span><span class="Identifier">+The OVS OpenFlow tables provide all of the necessary functionality to populate</span>
+<span class="lnr">156 </span><span class="Identifier">+the forwarding table and local ARP responder tables.</span>
+<span class="lnr">157 </span><span class="Identifier">+A wiki page describe how the flow tables did evolve on OVS agents:</span>
+<span class="lnr">158 </span><span class="Identifier">+- [2] without local ARP responder</span>
+<span class="lnr">159 </span><span class="Identifier">+- [3] with local ARP responder. /!\ This functionality is only available since</span>
+<span class="lnr">160 </span><span class="Identifier">+                                    the development branch 2.1. It's possible</span>
+<span class="lnr">161 </span><span class="Identifier">+                                    to disable (<a class="defect" title="disabled? see the code">enable</a> by default) it through</span>
+<span class="lnr">162 </span><span class="Identifier">+                                    the flag 'arp_responder'. /!\</span>
+<span class="lnr">163 </span><span class="Identifier">+</span>
+<span class="lnr">164 </span><span class="Identifier">+</span>
+<span class="lnr">165 </span><span class="Identifier">+Note: A difference persists between the LB and OVS agents when they are used</span>
+<span class="lnr">166 </span><span class="Identifier">+      with the l2-pop mechanism driver (and local ARP responder available). The</span>
+<span class="lnr">167 </span><span class="Identifier">+      LB agent will drop unknown unicast (VXLAN bridge mode), whereas the OVS</span>
+<span class="lnr">168 </span><span class="Identifier">+      agent will flood it.</span>
+<span class="lnr">169 </span><span class="Identifier">+</span>
+<span class="lnr">170 </span><span class="Identifier">+[1] <a href="https://wiki.openstack.org/wiki/L2population_blueprint">https://wiki.openstack.org/wiki/L2population_blueprint</a></span>
+<span class="lnr">171 </span><span class="Identifier">+[2] <a href="https://wiki.openstack.org/wiki/Ovs-flow-logic#OVS_flows_logic">https://wiki.openstack.org/wiki/Ovs-flow-logic#OVS_flows_logic</a></span>
+<span class="lnr">172 </span><span class="Identifier">+[3] <a href="https://wiki.openstack.org/wiki/Ovs-flow-logic#OVS_flows_logic_with_local_ARP_responder">https://wiki.openstack.org/wiki/Ovs-flow-logic#OVS_flows_logic_with_local_ARP_responder</a></span>
+<span class="lnr">173 </span>\ No newline at end of file
+<span class="lnr">174 </span><span class="Type">diff --git a/neutron/plugins/openvswitch/agent/ovs_neutron_agent.py b/neutron/plugins/openvswitch/agent/ovs_neutron_agent.py</span>
+<span class="lnr">175 </span>index 7011521..fd565bc 100644
+<span class="lnr">176 </span><span class="Type">--- a/neutron/plugins/openvswitch/agent/ovs_neutron_agent.py</span>
+<span class="lnr">177 </span><span class="Type">+++ b/neutron/plugins/openvswitch/agent/ovs_neutron_agent.py</span>
+<span class="lnr">178 </span><span class="Statement">@@ -152,7 +152,8 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">179 </span>                  veth_mtu=None, l2_population=False,
+<span class="lnr">180 </span>                  minimize_polling=False,
+<span class="lnr">181 </span>                  ovsdb_monitor_respawn_interval=(
+<span class="lnr">182 </span><span class="Special">-                     constants.DEFAULT_OVSDBMON_RESPAWN)):</span>
+<span class="lnr">183 </span><span class="Identifier">+                     constants.DEFAULT_OVSDBMON_RESPAWN),</span>
+<span class="lnr">184 </span><span class="Identifier">+                 arp_responder=False):</span>
+<span class="lnr">185 </span>         '''Constructor.
+<span class="lnr">186 </span>
+<span class="lnr">187 </span>         :param integ_br: name of the integration bridge.
+<span class="lnr">188 </span><span class="Statement">@@ -170,6 +171,8 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">189 </span>         :param ovsdb_monitor_respawn_interval: Optional, when using polling
+<span class="lnr">190 </span>                minimization, the number of seconds to wait before respawning
+<span class="lnr">191 </span>                the ovsdb monitor.
+<span class="lnr">192 </span><span class="Identifier">+        :param arp_responder: Optional, enable local ARP responder if it is</span>
+<span class="lnr">193 </span><span class="Identifier">+               supported.</span>
+<span class="lnr">194 </span>         '''
+<span class="lnr">195 </span>         self.veth_mtu = veth_mtu
+<span class="lnr">196 </span>         self.root_helper = root_helper
+<span class="lnr">197 </span><span class="Statement">@@ -177,6 +180,11 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">198 </span>                                                       q_const.MAX_VLAN_TAG))
+<span class="lnr">199 </span>         self.tunnel_types = tunnel_types or []
+<span class="lnr">200 </span>         self.l2_pop = l2_population
+<span class="lnr">201 </span><span class="Identifier">+        # TODO(ethuleau): Initially, local ARP responder is be <a class="comment" title="The ARP entries are provisioned by the ML2 l2 population mechanism driver.">dependent</a> to the</span>
+<span class="lnr">202 </span><span class="Identifier">+        #                 ML2 l2 population mechanism driver.</span>
+<span class="lnr">203 </span><span class="Identifier">+        self.arp_responder_enabled = (arp_responder and</span>
+<span class="lnr">204 </span><span class="Identifier">+                                      self._check_arp_responder_support() and</span>
+<span class="lnr">205 </span><span class="Identifier">+                                      self.l2_pop)</span>
+<span class="lnr">206 </span>         self.agent_state = {
+<span class="lnr">207 </span>             'binary': 'neutron-openvswitch-agent',
+<span class="lnr">208 </span>             'host': cfg.CONF.host,
+<span class="lnr">209 </span><span class="Statement">@@ -184,7 +192,9 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">210 </span>             'configurations': {'bridge_mappings': bridge_mappings,
+<span class="lnr">211 </span>                                'tunnel_types': self.tunnel_types,
+<span class="lnr">212 </span>                                'tunneling_ip': local_ip,
+<span class="lnr">213 </span><span class="Special">-                               'l2_population': self.l2_pop},</span>
+<span class="lnr">214 </span><span class="Identifier">+                               'l2_population': self.l2_pop,</span>
+<span class="lnr">215 </span><span class="Identifier">+                               'arp_responder_enabled':</span>
+<span class="lnr">216 </span><span class="Identifier">+                               self.arp_responder_enabled},</span>
+<span class="lnr">217 </span>             'agent_type': q_const.AGENT_TYPE_OVS,
+<span class="lnr">218 </span>             'start_flag': True}
+<span class="lnr">219 </span>
+<span class="lnr">220 </span><span class="Statement">@@ -233,6 +243,20 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">221 </span>                 LOG.exception(_(&quot;Agent terminated&quot;))
+<span class="lnr">222 </span>                 raise SystemExit(1)
+<span class="lnr">223 </span>
+<span class="lnr">224 </span><span class="Identifier">+    def _check_arp_responder_support(self):</span>
+<span class="lnr">225 </span><span class="Identifier">+        '''Check if OVS supports to modify ARP headers.</span>
+<span class="lnr">226 </span><span class="Identifier">+</span>
+<span class="lnr">227 </span><span class="Identifier">+        This functionality is only available since the development branch 2.1.</span>
+<span class="lnr">228 </span><span class="Identifier">+        '''</span>
+<span class="lnr">229 </span><span class="Identifier">+        args = ['arp,action=load:0x2-&gt;NXM_OF_ARP_OP[],'</span>
+<span class="lnr">230 </span><span class="Identifier">+                'move:NXM_NX_ARP_SHA[]-&gt;NXM_NX_ARP_THA[],'</span>
+<span class="lnr">231 </span><span class="Identifier">+                'move:NXM_OF_ARP_SPA[]-&gt;NXM_OF_ARP_TPA[]']</span>
+<span class="lnr">232 </span><span class="Identifier">+        supported = ovs_lib.ofctl_arg_supported(self.root_helper, 'add-flow',</span>
+<span class="lnr">233 </span><span class="Identifier">+                                                args)</span>
+<span class="lnr">234 </span><span class="Identifier">+        if not supported:</span>
+<span class="lnr">235 </span><span class="Identifier">+            LOG.warning(_('OVS version can not support ARP responder.'))</span>
+<span class="lnr">236 </span><span class="Identifier">+        return supported</span>
+<span class="lnr">237 </span><span class="Identifier">+</span>
+<span class="lnr">238 </span>     def _report_state(self):
+<span class="lnr">239 </span>         # How many devices are likely used by a VM
+<span class="lnr">240 </span>         self.agent_state.get('configurations')['devices'] = (
+<span class="lnr">241 </span><span class="Statement">@@ -375,7 +399,8 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">242 </span>                                  actions=&quot;strip_vlan,set_tunnel:%s,&quot;
+<span class="lnr">243 </span>                                  &quot;output:%s&quot; % (lvm.segmentation_id, ofports))
+<span class="lnr">244 </span>         else:
+<span class="lnr">245 </span><span class="Special">-            # TODO(feleouet): add ARP responder entry</span>
+<span class="lnr">246 </span><span class="Identifier">+            self._set_arp_responder('add', lvm.vlan, port_info[0],</span>
+<span class="lnr">247 </span><span class="Identifier">+                                    port_info[1])</span>
+<span class="lnr">248 </span>             self.tun_br.add_flow(table=constants.UCAST_TO_TUN,
+<span class="lnr">249 </span>                                  priority=2,
+<span class="lnr">250 </span>                                  dl_vlan=lvm.vlan,
+<span class="lnr">251 </span><span class="Statement">@@ -400,11 +425,53 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">252 </span>             # Check if this tunnel port is still used
+<span class="lnr">253 </span>             self.cleanup_tunnel_port(ofport, lvm.network_type)
+<span class="lnr">254 </span>         else:
+<span class="lnr">255 </span><span class="Special">-            #TODO(feleouet): remove ARP responder entry</span>
+<span class="lnr">256 </span><span class="Identifier">+            self._set_arp_responder('remove', lvm.vlan, port_info[0],</span>
+<span class="lnr">257 </span><span class="Identifier">+                                    port_info[1])</span>
+<span class="lnr">258 </span>             self.tun_br.delete_flows(table=constants.UCAST_TO_TUN,
+<span class="lnr">259 </span>                                      dl_vlan=lvm.vlan,
+<span class="lnr">260 </span>                                      dl_dst=port_info[0])
+<span class="lnr">261 </span>
+<span class="lnr">262 </span><span class="Identifier">+    def _fdb_chg_ip(self, context, fdb_entries):</span>
+<span class="lnr">263 </span><span class="Identifier">+        '''fdb update when an IP of a port is updated.</span>
+<span class="lnr">264 </span><span class="Identifier">+</span>
+<span class="lnr">265 </span><span class="Identifier">+        The ML2 l2-pop mechanism driver send an fdb update rpc message when an</span>
+<span class="lnr">266 </span><span class="Identifier">+        IP of a port is updated.</span>
+<span class="lnr">267 </span><span class="Identifier">+</span>
+<span class="lnr">268 </span><span class="Identifier">+        :param context: RPC context.</span>
+<span class="lnr">269 </span><span class="Identifier">+        :param fdb_entries: fdb dicts that contain all mac/IP informations per</span>
+<span class="lnr">270 </span><span class="Identifier">+                            agent and network.</span>
+<span class="lnr">271 </span><span class="Identifier">+                               {'net1':</span>
+<span class="lnr">272 </span><span class="Identifier">+                                {'agent_ip':</span>
+<span class="lnr">273 </span><span class="Identifier">+                                 {'before': [[mac, ip]],</span>
+<span class="lnr">274 </span><span class="Identifier">+                                  'after': [[mac, ip]]</span>
+<span class="lnr">275 </span><span class="Identifier">+                                 }</span>
+<span class="lnr">276 </span><span class="Identifier">+                                }</span>
+<span class="lnr">277 </span><span class="Identifier">+                                'net2':</span>
+<span class="lnr">278 </span><span class="Identifier">+                                ...</span>
+<span class="lnr">279 </span><span class="Identifier">+                               }</span>
+<span class="lnr">280 </span><span class="Identifier">+        '''</span>
+<span class="lnr">281 </span><span class="Identifier">+        LOG.debug(_(&quot;update chg_ip received&quot;))</span>
+<span class="lnr">282 </span><span class="Identifier">+</span>
+<span class="lnr">283 </span><span class="Identifier">+        # TODO(ethuleau): Use OVS defer apply flows for all rules will be an</span>
+<span class="lnr">284 </span><span class="Identifier">+        # interesting improvement here. But actually, OVS lib defer apply flows</span>
+<span class="lnr">285 </span><span class="Identifier">+        # methods doesn't ensure the add flows will be applied before delete.</span>
+<span class="lnr">286 </span><span class="Identifier">+        for network_id, agent_ports in fdb_entries.items():</span>
+<span class="lnr">287 </span><span class="Identifier">+            lvm = self.local_vlan_map.get(network_id)</span>
+<span class="lnr">288 </span><span class="Identifier">+            if not lvm:</span>
+<span class="lnr">289 </span><span class="Identifier">+                continue</span>
+<span class="lnr">290 </span><span class="Identifier">+</span>
+<span class="lnr">291 </span><span class="Identifier">+            for agent_ip, state in agent_ports.items():</span>
+<span class="lnr">292 </span><span class="Identifier">+                if agent_ip == self.local_ip:</span>
+<span class="lnr">293 </span><span class="Identifier">+                    continue</span>
+<span class="lnr">294 </span><span class="Identifier">+</span>
+<span class="lnr">295 </span><span class="Identifier">+                after = state.get('after')</span>
+<span class="lnr">296 </span><span class="Identifier">+                for mac, ip in after:</span>
+<span class="lnr">297 </span><span class="Identifier">+                    self._set_arp_responder('add', lvm.vlan, mac, ip)</span>
+<span class="lnr">298 </span><span class="Identifier">+</span>
+<span class="lnr">299 </span><span class="Identifier">+                before = state.get('before')</span>
+<span class="lnr">300 </span><span class="Identifier">+                for mac, ip in before:</span>
+<span class="lnr">301 </span><span class="Identifier">+                    self._set_arp_responder('remove', lvm.vlan, mac, ip)</span>
+<span class="lnr">302 </span><span class="Identifier">+</span>
+<span class="lnr">303 </span>     def fdb_update(self, context, fdb_entries):
+<span class="lnr">304 </span>         LOG.debug(_(&quot;fdb_update received&quot;))
+<span class="lnr">305 </span>         for action, values in fdb_entries.items():
+<span class="lnr">306 </span><span class="Statement">@@ -414,6 +481,47 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">307 </span>
+<span class="lnr">308 </span>             getattr(self, method)(context, values)
+<span class="lnr">309 </span>
+<span class="lnr">310 </span><span class="Identifier">+    def _set_arp_responder(self, action, lvid, mac_str, ip_str):</span>
+<span class="lnr">311 </span><span class="Identifier">+        '''Set the ARP respond entry.</span>
+<span class="lnr">312 </span><span class="Identifier">+</span>
+<span class="lnr">313 </span><span class="Identifier">+        When the l2 population mechanism driver and OVS supports to edit ARP</span>
+<span class="lnr">314 </span><span class="Identifier">+        fields, a table (ARP_RESPONDER) to resolve ARP locally is added to the</span>
+<span class="lnr">315 </span><span class="Identifier">+        tunnel bridge.</span>
+<span class="lnr">316 </span><span class="Identifier">+</span>
+<span class="lnr">317 </span><span class="Identifier">+        :param action: add or remove ARP entry.</span>
+<span class="lnr">318 </span><span class="Identifier">+        :param lvid: local VLAN map of network's ARP entry.</span>
+<span class="lnr">319 </span><span class="Identifier">+        :param mac_str: MAC string value.</span>
+<span class="lnr">320 </span><span class="Identifier">+        :param ip_str: IP string value.</span>
+<span class="lnr">321 </span><span class="Identifier">+        '''</span>
+<span class="lnr">322 </span><span class="Identifier">+        if not self.arp_responder_enabled:</span>
+<span class="lnr">323 </span><span class="Identifier">+            return</span>
+<span class="lnr">324 </span><span class="Identifier">+</span>
+<span class="lnr">325 </span><span class="Identifier">+        mac = <a class="comment" title="Convert to a type suitable for output as string and as hex below.">netaddr.EUI</a>(mac_str, dialect=netaddr.mac_unix)</span>
+<span class="lnr">326 </span><span class="Identifier">+        ip = <a class="comment" title="ditto">netaddr.IPAddress</a>(ip_str)</span>
+<span class="lnr">327 </span><span class="Identifier">+</span>
+<span class="lnr">328 </span><span class="Identifier">+        if action == 'add':</span>
+<span class="lnr">329 </span><span class="Identifier">+            actions = ('<a class="comment" title="(ethernet header) set reply-mac-dst">move:NXM_OF_ETH_SRC[]-&gt;NXM_OF_ETH_DST[]</a>,'</span>
+<span class="lnr">330 </span><span class="Identifier">+                       '<a class="comment" title="(ethernet header) set reply-mac-src">mod_dl_src:%(mac)s</a>,'</span>
+<span class="lnr">331 </span><span class="Identifier">+                       '<a class="comment" title="set op as ARP response">load:0x2-&gt;NXM_OF_ARP_OP[]</a>,'</span>
+<span class="lnr">332 </span><span class="Identifier">+                       '<a class="comment" title="set reply-mac-dst">move:NXM_NX_ARP_SHA[]-&gt;NXM_NX_ARP_THA[]</a>,'</span>
+<span class="lnr">333 </span><span class="Identifier">+                       '<a class="comment" title="set reply-protocol-address-dst">move:NXM_OF_ARP_SPA[]-&gt;NXM_OF_ARP_TPA[]</a>,'</span>
+<span class="lnr">334 </span><span class="Identifier">+                       '<a class="comment" title="set reply-mac-src">load:%(mac)#x-&gt;NXM_NX_ARP_SHA[]</a>,'</span>
+<span class="lnr">335 </span><span class="Identifier">+                       '<a class="comment" title="set reply-protocol-address-src">load:%(ip)#x-&gt;NXM_OF_ARP_SPA[]</a>,'</span>
+<span class="lnr">336 </span><span class="Identifier">+                       '<a class="comment" title="back to the address it was before">in_port</a>' % {'mac': mac, 'ip': ip})</span>
+<span class="lnr">337 </span><span class="Identifier">+            self.tun_br.add_flow(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">338 </span><span class="Identifier">+                                 priority=1,</span>
+<span class="lnr">339 </span><span class="Identifier">+                                 proto='arp',</span>
+<span class="lnr">340 </span><span class="Identifier">+                                 dl_vlan=lvid,</span>
+<span class="lnr">341 </span><span class="Identifier">+                                 nw_dst='%s' % ip,</span>
+<span class="lnr">342 </span><span class="Identifier">+                                 actions=actions)</span>
+<span class="lnr">343 </span><span class="Identifier">+        elif action == 'remove':</span>
+<span class="lnr">344 </span><span class="Identifier">+            self.tun_br.delete_flows(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">345 </span><span class="Identifier">+                                     proto='arp',</span>
+<span class="lnr">346 </span><span class="Identifier">+                                     dl_vlan=lvid,</span>
+<span class="lnr">347 </span><span class="Identifier">+                                     nw_dst='%s' % ip)</span>
+<span class="lnr">348 </span><span class="Identifier">+        else:</span>
+<span class="lnr">349 </span><span class="Identifier">+            LOG.warning(_('Action %s not supported'), action)</span>
+<span class="lnr">350 </span><span class="Identifier">+</span>
+<span class="lnr">351 </span>     def create_rpc_dispatcher(self):
+<span class="lnr">352 </span>         '''Get the rpc dispatcher for this manager.
+<span class="lnr">353 </span>
+<span class="lnr">354 </span><span class="Statement">@@ -701,13 +809,24 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">355 </span>                              actions=&quot;resubmit(,%s)&quot; %
+<span class="lnr">356 </span>                              constants.PATCH_LV_TO_TUN)
+<span class="lnr">357 </span>         self.tun_br.add_flow(priority=0, actions=&quot;drop&quot;)
+<span class="lnr">358 </span><span class="Identifier">+        if self.arp_responder_enabled:</span>
+<span class="lnr">359 </span><span class="Identifier">+            # ARP broadcast-ed request go to the local ARP_RESPONDER table to</span>
+<span class="lnr">360 </span><span class="Identifier">+            # be locally resolved</span>
+<span class="lnr">361 </span><span class="Identifier">+            self.tun_br.add_flow(table=constants.PATCH_LV_TO_TUN,</span>
+<span class="lnr">362 </span><span class="Identifier">+                                 priority=1,</span>
+<span class="lnr">363 </span><span class="Identifier">+                                 proto='arp',</span>
+<span class="lnr">364 </span><span class="Identifier">+                                 dl_dst=&quot;ff:ff:ff:ff:ff:ff&quot;,</span>
+<span class="lnr">365 </span><span class="Identifier">+                                 actions=(&quot;resubmit(,%s)&quot; %</span>
+<span class="lnr">366 </span><span class="Identifier">+                                          constants.ARP_RESPONDER))</span>
+<span class="lnr">367 </span>         # PATCH_LV_TO_TUN table will handle packets coming from patch_int
+<span class="lnr">368 </span>         # unicasts go to table UCAST_TO_TUN where remote adresses are learnt
+<span class="lnr">369 </span>         self.tun_br.add_flow(table=constants.PATCH_LV_TO_TUN,
+<span class="lnr">370 </span><span class="Identifier">+                             priority=0,</span>
+<span class="lnr">371 </span>                              dl_dst=&quot;00:00:00:00:00:00/01:00:00:00:00:00&quot;,
+<span class="lnr">372 </span>                              actions=&quot;resubmit(,%s)&quot; % constants.UCAST_TO_TUN)
+<span class="lnr">373 </span>         # Broadcasts/multicasts go to table FLOOD_TO_TUN that handles flooding
+<span class="lnr">374 </span>         self.tun_br.add_flow(table=constants.PATCH_LV_TO_TUN,
+<span class="lnr">375 </span><span class="Identifier">+                             priority=0,</span>
+<span class="lnr">376 </span>                              dl_dst=&quot;01:00:00:00:00:00/01:00:00:00:00:00&quot;,
+<span class="lnr">377 </span>                              actions=&quot;resubmit(,%s)&quot; % constants.FLOOD_TO_TUN)
+<span class="lnr">378 </span>         # Tables [tunnel_type]_TUN_TO_LV will set lvid depending on tun_id
+<span class="lnr">379 </span><span class="Statement">@@ -742,6 +861,13 @@</span><span class="PreProc"> class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,</span>
+<span class="lnr">380 </span>                              priority=0,
+<span class="lnr">381 </span>                              actions=&quot;resubmit(,%s)&quot; %
+<span class="lnr">382 </span>                              constants.FLOOD_TO_TUN)
+<span class="lnr">383 </span><span class="Identifier">+        if self.arp_responder_enabled:</span>
+<span class="lnr">384 </span><span class="Identifier">+            # If none of the ARP entries correspond to the requested IP, the</span>
+<span class="lnr">385 </span><span class="Identifier">+            # broadcast-ed packet is resubmitted to the flooding table</span>
+<span class="lnr">386 </span><span class="Identifier">+            self.tun_br.add_flow(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">387 </span><span class="Identifier">+                                 priority=0,</span>
+<span class="lnr">388 </span><span class="Identifier">+                                 actions=&quot;resubmit(,%s)&quot; %</span>
+<span class="lnr">389 </span><span class="Identifier">+                                 constants.FLOOD_TO_TUN)</span>
+<span class="lnr">390 </span>         # FLOOD_TO_TUN will handle flooding in tunnels based on lvid,
+<span class="lnr">391 </span>         # for now, add a default drop action
+<span class="lnr">392 </span>         self.tun_br.add_flow(table=constants.FLOOD_TO_TUN,
+<span class="lnr">393 </span><span class="Statement">@@ -1318,6 +1444,7 @@</span><span class="PreProc"> def create_agent_config_map(config):</span>
+<span class="lnr">394 </span>         tunnel_types=config.AGENT.tunnel_types,
+<span class="lnr">395 </span>         veth_mtu=config.AGENT.veth_mtu,
+<span class="lnr">396 </span>         l2_population=config.AGENT.l2_population,
+<span class="lnr">397 </span><span class="Identifier">+        arp_responder=config.AGENT.arp_responder,</span>
+<span class="lnr">398 </span>     )
+<span class="lnr">399 </span>
+<span class="lnr">400 </span>     # If enable_tunneling is TRUE, set tunnel_type to default to GRE
+<span class="lnr">401 </span><span class="Type">diff --git a/neutron/plugins/openvswitch/common/config.py b/neutron/plugins/openvswitch/common/config.py</span>
+<span class="lnr">402 </span>index 038b347..b3c332d 100644
+<span class="lnr">403 </span><span class="Type">--- a/neutron/plugins/openvswitch/common/config.py</span>
+<span class="lnr">404 </span><span class="Type">+++ b/neutron/plugins/openvswitch/common/config.py</span>
+<span class="lnr">405 </span><span class="Statement">@@ -80,6 +80,8 @@</span><span class="PreProc"> agent_opts = [</span>
+<span class="lnr">406 </span>     cfg.BoolOpt('l2_population', default=False,
+<span class="lnr">407 </span>                 help=_(&quot;Use ml2 l2population mechanism driver to learn &quot;
+<span class="lnr">408 </span>                        &quot;remote mac and IPs and improve tunnel scalability&quot;)),
+<span class="lnr">409 </span><span class="Identifier">+    cfg.BoolOpt('arp_responder', default=False,</span>
+<span class="lnr">410 </span><span class="Identifier">+                help=_(&quot;Enable local ARP responder if it is supported&quot;)),</span>
+<span class="lnr">411 </span> ]
+<span class="lnr">412 </span>
+<span class="lnr">413 </span>
+<span class="lnr">414 </span><span class="Type">diff --git a/neutron/plugins/openvswitch/common/constants.py b/neutron/plugins/openvswitch/common/constants.py</span>
+<span class="lnr">415 </span>index 3a5b4aa..f6e748b 100644
+<span class="lnr">416 </span><span class="Type">--- a/neutron/plugins/openvswitch/common/constants.py</span>
+<span class="lnr">417 </span><span class="Type">+++ b/neutron/plugins/openvswitch/common/constants.py</span>
+<span class="lnr">418 </span><span class="Statement">@@ -45,7 +45,9 @@</span><span class="PreProc"> GRE_TUN_TO_LV = 2</span>
+<span class="lnr">419 </span> VXLAN_TUN_TO_LV = 3
+<span class="lnr">420 </span> LEARN_FROM_TUN = 10
+<span class="lnr">421 </span> UCAST_TO_TUN = 20
+<span class="lnr">422 </span><span class="Special">-FLOOD_TO_TUN = 21</span>
+<span class="lnr">423 </span><span class="Identifier">+ARP_RESPONDER = 21</span>
+<span class="lnr">424 </span><span class="Identifier">+FLOOD_TO_TUN = 22</span>
+<span class="lnr">425 </span><span class="Identifier">+</span>
+<span class="lnr">426 </span> # Map tunnel types to tables number
+<span class="lnr">427 </span> TUN_TABLE = {p_const.TYPE_GRE: GRE_TUN_TO_LV,
+<span class="lnr">428 </span>              p_const.TYPE_VXLAN: VXLAN_TUN_TO_LV}
+<span class="lnr">429 </span><span class="Type">diff --git a/neutron/tests/unit/agent/linux/test_ovs_lib.py b/neutron/tests/unit/agent/linux/test_ovs_lib.py</span>
+<span class="lnr">430 </span>index 4b42317..a1daa22 100644
+<span class="lnr">431 </span><span class="Type">--- a/neutron/tests/unit/agent/linux/test_ovs_lib.py</span>
+<span class="lnr">432 </span><span class="Type">+++ b/neutron/tests/unit/agent/linux/test_ovs_lib.py</span>
+<span class="lnr">433 </span><span class="Statement">@@ -915,3 +915,35 @@</span><span class="PreProc"> class OVS_Lib_Test(base.BaseTestCase):</span>
+<span class="lnr">434 </span>         min_kernel_ver = constants.MINIMUM_LINUX_KERNEL_OVS_VXLAN
+<span class="lnr">435 </span>         self._check_ovs_vxlan_version(min_vxlan_ver, min_vxlan_ver,
+<span class="lnr">436 </span>                                       min_kernel_ver, expecting_ok=True)
+<span class="lnr">437 </span><span class="Identifier">+</span>
+<span class="lnr">438 </span><span class="Identifier">+    def test_ofctl_arg_supported(self):</span>
+<span class="lnr">439 </span><span class="Identifier">+        with mock.patch('neutron.common.utils.get_random_string') as utils:</span>
+<span class="lnr">440 </span><span class="Identifier">+            utils.return_value = 'test'</span>
+<span class="lnr">441 </span><span class="Identifier">+            supported = ovs_lib.ofctl_arg_supported(self.root_helper, 'cmd',</span>
+<span class="lnr">442 </span><span class="Identifier">+                                                    ['args'])</span>
+<span class="lnr">443 </span><span class="Identifier">+            self.execute.assert_has_calls([</span>
+<span class="lnr">444 </span><span class="Identifier">+                mock.call(['ovs-vsctl', self.TO, '--', '--if-exists', 'del-br',</span>
+<span class="lnr">445 </span><span class="Identifier">+                           'br-test-test'], root_helper=self.root_helper),</span>
+<span class="lnr">446 </span><span class="Identifier">+                mock.call(['ovs-vsctl', self.TO, '--', '--may-exist', 'add-br',</span>
+<span class="lnr">447 </span><span class="Identifier">+                           'br-test-test'], root_helper=self.root_helper),</span>
+<span class="lnr">448 </span><span class="Identifier">+                mock.call(['ovs-ofctl', 'cmd', 'br-test-test', 'args'],</span>
+<span class="lnr">449 </span><span class="Identifier">+                          root_helper=self.root_helper),</span>
+<span class="lnr">450 </span><span class="Identifier">+                mock.call(['ovs-vsctl', self.TO, '--', '--if-exists', 'del-br',</span>
+<span class="lnr">451 </span><span class="Identifier">+                           'br-test-test'], root_helper=self.root_helper)</span>
+<span class="lnr">452 </span><span class="Identifier">+            ])</span>
+<span class="lnr">453 </span><span class="Identifier">+            self.assertTrue(supported)</span>
+<span class="lnr">454 </span><span class="Identifier">+</span>
+<span class="lnr">455 </span><span class="Identifier">+            self.execute.side_effect = Exception</span>
+<span class="lnr">456 </span><span class="Identifier">+            supported = ovs_lib.ofctl_arg_supported(self.root_helper, 'cmd',</span>
+<span class="lnr">457 </span><span class="Identifier">+                                                    ['args'])</span>
+<span class="lnr">458 </span><span class="Identifier">+            self.execute.assert_has_calls([</span>
+<span class="lnr">459 </span><span class="Identifier">+                mock.call(['ovs-vsctl', self.TO, '--', '--if-exists', 'del-br',</span>
+<span class="lnr">460 </span><span class="Identifier">+                           'br-test-test'], root_helper=self.root_helper),</span>
+<span class="lnr">461 </span><span class="Identifier">+                mock.call(['ovs-vsctl', self.TO, '--', '--may-exist', 'add-br',</span>
+<span class="lnr">462 </span><span class="Identifier">+                           'br-test-test'], root_helper=self.root_helper),</span>
+<span class="lnr">463 </span><span class="Identifier">+                mock.call(['ovs-ofctl', 'cmd', 'br-test-test', 'args'],</span>
+<span class="lnr">464 </span><span class="Identifier">+                          root_helper=self.root_helper),</span>
+<span class="lnr">465 </span><span class="Identifier">+                mock.call(['ovs-vsctl', self.TO, '--', '--if-exists', 'del-br',</span>
+<span class="lnr">466 </span><span class="Identifier">+                           'br-test-test'], root_helper=self.root_helper)</span>
+<span class="lnr">467 </span><span class="Identifier">+            ])</span>
+<span class="lnr">468 </span><span class="Identifier">+            self.assertFalse(supported)</span>
+<span class="lnr">469 </span><span class="Type">diff --git a/neutron/tests/unit/openvswitch/test_ovs_defaults.py b/neutron/tests/unit/openvswitch/test_ovs_defaults.py</span>
+<span class="lnr">470 </span>index b2d3011..0d5c00f 100644
+<span class="lnr">471 </span><span class="Type">--- a/neutron/tests/unit/openvswitch/test_ovs_defaults.py</span>
+<span class="lnr">472 </span><span class="Type">+++ b/neutron/tests/unit/openvswitch/test_ovs_defaults.py</span>
+<span class="lnr">473 </span><span class="Statement">@@ -31,3 +31,5 @@</span><span class="PreProc"> class ConfigurationTest(base.BaseTestCase):</span>
+<span class="lnr">474 </span>         self.assertEqual(0, len(cfg.CONF.OVS.bridge_mappings))
+<span class="lnr">475 </span>         self.assertEqual(0, len(cfg.CONF.OVS.network_vlan_ranges))
+<span class="lnr">476 </span>         self.assertEqual(0, len(cfg.CONF.OVS.tunnel_id_ranges))
+<span class="lnr">477 </span><span class="Identifier">+        self.assertFalse(cfg.CONF.AGENT.l2_population)</span>
+<span class="lnr">478 </span><span class="Identifier">+        self.assertFalse(cfg.CONF.AGENT.arp_responder)</span>
+<span class="lnr">479 </span><span class="Type">diff --git a/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py b/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py</span>
+<span class="lnr">480 </span>index 6df7716..b219ad5 100644
+<span class="lnr">481 </span><span class="Type">--- a/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py</span>
+<span class="lnr">482 </span><span class="Type">+++ b/neutron/tests/unit/openvswitch/test_ovs_neutron_agent.py</span>
+<span class="lnr">483 </span><span class="Statement">@@ -18,6 +18,7 @@</span><span class="PreProc"> import contextlib</span>
+<span class="lnr">484 </span> import sys
+<span class="lnr">485 </span>
+<span class="lnr">486 </span> import mock
+<span class="lnr">487 </span><span class="Identifier">+import netaddr</span>
+<span class="lnr">488 </span> from oslo.config import cfg
+<span class="lnr">489 </span> import testtools
+<span class="lnr">490 </span>
+<span class="lnr">491 </span><span class="Statement">@@ -35,6 +36,10 @@</span><span class="PreProc"> NOTIFIER = ('neutron.plugins.openvswitch.'</span>
+<span class="lnr">492 </span>             'ovs_neutron_plugin.AgentNotifierApi')
+<span class="lnr">493 </span> OVS_LINUX_KERN_VERS_WITHOUT_VXLAN = &quot;3.12.0&quot;
+<span class="lnr">494 </span>
+<span class="lnr">495 </span><span class="Identifier">+FAKE_MAC = '00:11:22:33:44:55'</span>
+<span class="lnr">496 </span><span class="Identifier">+FAKE_IP1 = '10.0.0.1'</span>
+<span class="lnr">497 </span><span class="Identifier">+FAKE_IP2 = '10.0.0.2'</span>
+<span class="lnr">498 </span><span class="Identifier">+</span>
+<span class="lnr">499 </span>
+<span class="lnr">500 </span> class CreateAgentConfigMap(base.BaseTestCase):
+<span class="lnr">501 </span>
+<span class="lnr">502 </span><span class="Statement">@@ -118,7 +123,10 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">503 </span>                        return_value='00:00:00:00:00:01'),
+<span class="lnr">504 </span>             mock.patch('neutron.openstack.common.loopingcall.'
+<span class="lnr">505 </span>                        'FixedIntervalLoopingCall',
+<span class="lnr">506 </span><span class="Special">-                       new=MockFixedIntervalLoopingCall)):</span>
+<span class="lnr">507 </span><span class="Identifier">+                       new=MockFixedIntervalLoopingCall),</span>
+<span class="lnr">508 </span><span class="Identifier">+            mock.patch('neutron.plugins.openvswitch.agent.ovs_neutron_agent.'</span>
+<span class="lnr">509 </span><span class="Identifier">+                       'OVSNeutronAgent._check_arp_responder_support',</span>
+<span class="lnr">510 </span><span class="Identifier">+                       return_value=True)):</span>
+<span class="lnr">511 </span>             self.agent = ovs_neutron_agent.OVSNeutronAgent(**kwargs)
+<span class="lnr">512 </span>             self.agent.tun_br = mock.Mock()
+<span class="lnr">513 </span>         self.agent.sg_agent = mock.Mock()
+<span class="lnr">514 </span><span class="Statement">@@ -503,6 +511,7 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">515 </span>         self.agent.local_vlan_map = {'net1': lvm1, 'net2': lvm2}
+<span class="lnr">516 </span>         self.agent.tun_br_ofports = {'gre':
+<span class="lnr">517 </span>                                      {'1.1.1.1': '1', '2.2.2.2': '2'}}
+<span class="lnr">518 </span><span class="Identifier">+        self.agent.arp_responder_enabled = True</span>
+<span class="lnr">519 </span>
+<span class="lnr">520 </span>     def test_fdb_ignore_network(self):
+<span class="lnr">521 </span>         self._prepare_l2_pop_ofports()
+<span class="lnr">522 </span><span class="Statement">@@ -528,7 +537,7 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">523 </span>                       'segment_id': 'tun2',
+<span class="lnr">524 </span>                       'ports':
+<span class="lnr">525 </span>                       {'agent_ip':
+<span class="lnr">526 </span><span class="Special">-                       [['mac', 'ip'],</span>
+<span class="lnr">527 </span><span class="Identifier">+                       [[FAKE_MAC, FAKE_IP1],</span>
+<span class="lnr">528 </span>                         n_const.FLOODING_ENTRY]}}}
+<span class="lnr">529 </span>         with mock.patch.object(self.agent.tun_br,
+<span class="lnr">530 </span>                                &quot;defer_apply_on&quot;) as defer_fn:
+<span class="lnr">531 </span><span class="Statement">@@ -545,7 +554,7 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">532 </span>                       'segment_id': 'tun1',
+<span class="lnr">533 </span>                       'ports':
+<span class="lnr">534 </span>                       {'2.2.2.2':
+<span class="lnr">535 </span><span class="Special">-                       [['mac', 'ip'],</span>
+<span class="lnr">536 </span><span class="Identifier">+                       [[FAKE_MAC, FAKE_IP1],</span>
+<span class="lnr">537 </span>                         n_const.FLOODING_ENTRY]}}}
+<span class="lnr">538 </span>         with contextlib.nested(
+<span class="lnr">539 </span>             mock.patch.object(self.agent.tun_br, 'add_flow'),
+<span class="lnr">540 </span><span class="Statement">@@ -554,12 +563,30 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">541 </span>         ) as (add_flow_fn, mod_flow_fn, add_tun_fn):
+<span class="lnr">542 </span>             self.agent.fdb_add(None, fdb_entry)
+<span class="lnr">543 </span>             self.assertFalse(add_tun_fn.called)
+<span class="lnr">544 </span><span class="Special">-            add_flow_fn.assert_called_with(table=constants.UCAST_TO_TUN,</span>
+<span class="lnr">545 </span><span class="Special">-                                           priority=2,</span>
+<span class="lnr">546 </span><span class="Special">-                                           dl_vlan='vlan1',</span>
+<span class="lnr">547 </span><span class="Special">-                                           dl_dst='mac',</span>
+<span class="lnr">548 </span><span class="Special">-                                           actions='strip_vlan,'</span>
+<span class="lnr">549 </span><span class="Special">-                                           'set_tunnel:seg1,output:2')</span>
+<span class="lnr">550 </span><span class="Identifier">+            actions = ('move:NXM_OF_ETH_SRC[]-&gt;NXM_OF_ETH_DST[],'</span>
+<span class="lnr">551 </span><span class="Identifier">+                       'mod_dl_src:%(mac)s,'</span>
+<span class="lnr">552 </span><span class="Identifier">+                       'load:0x2-&gt;NXM_OF_ARP_OP[],'</span>
+<span class="lnr">553 </span><span class="Identifier">+                       'move:NXM_NX_ARP_SHA[]-&gt;NXM_NX_ARP_THA[],'</span>
+<span class="lnr">554 </span><span class="Identifier">+                       'move:NXM_OF_ARP_SPA[]-&gt;NXM_OF_ARP_TPA[],'</span>
+<span class="lnr">555 </span><span class="Identifier">+                       'load:%(mac)#x-&gt;NXM_NX_ARP_SHA[],'</span>
+<span class="lnr">556 </span><span class="Identifier">+                       'load:%(ip)#x-&gt;NXM_OF_ARP_SPA[],'</span>
+<span class="lnr">557 </span><span class="Identifier">+                       'in_port' %</span>
+<span class="lnr">558 </span><span class="Identifier">+                       {'mac': netaddr.EUI(FAKE_MAC, dialect=netaddr.mac_unix),</span>
+<span class="lnr">559 </span><span class="Identifier">+                        'ip': netaddr.IPAddress(FAKE_IP1)})</span>
+<span class="lnr">560 </span><span class="Identifier">+            add_flow_fn.assert_has_calls([</span>
+<span class="lnr">561 </span><span class="Identifier">+                mock.call(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">562 </span><span class="Identifier">+                          priority=1,</span>
+<span class="lnr">563 </span><span class="Identifier">+                          proto='arp',</span>
+<span class="lnr">564 </span><span class="Identifier">+                          dl_vlan='vlan1',</span>
+<span class="lnr">565 </span><span class="Identifier">+                          nw_dst=FAKE_IP1,</span>
+<span class="lnr">566 </span><span class="Identifier">+                          actions=actions),</span>
+<span class="lnr">567 </span><span class="Identifier">+                mock.call(table=constants.UCAST_TO_TUN,</span>
+<span class="lnr">568 </span><span class="Identifier">+                          priority=2,</span>
+<span class="lnr">569 </span><span class="Identifier">+                          dl_vlan='vlan1',</span>
+<span class="lnr">570 </span><span class="Identifier">+                          dl_dst=FAKE_MAC,</span>
+<span class="lnr">571 </span><span class="Identifier">+                          actions='strip_vlan,'</span>
+<span class="lnr">572 </span><span class="Identifier">+                          'set_tunnel:seg1,output:2')</span>
+<span class="lnr">573 </span><span class="Identifier">+            ])</span>
+<span class="lnr">574 </span>             mod_flow_fn.assert_called_with(table=constants.FLOOD_TO_TUN,
+<span class="lnr">575 </span>                                            dl_vlan='vlan1',
+<span class="lnr">576 </span>                                            actions='strip_vlan,'
+<span class="lnr">577 </span><span class="Statement">@@ -572,16 +599,22 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">578 </span>                       'segment_id': 'tun2',
+<span class="lnr">579 </span>                       'ports':
+<span class="lnr">580 </span>                       {'2.2.2.2':
+<span class="lnr">581 </span><span class="Special">-                       [['mac', 'ip'],</span>
+<span class="lnr">582 </span><span class="Identifier">+                       [[FAKE_MAC, FAKE_IP1],</span>
+<span class="lnr">583 </span>                         n_const.FLOODING_ENTRY]}}}
+<span class="lnr">584 </span>         with contextlib.nested(
+<span class="lnr">585 </span>             mock.patch.object(self.agent.tun_br, 'mod_flow'),
+<span class="lnr">586 </span>             mock.patch.object(self.agent.tun_br, 'delete_flows'),
+<span class="lnr">587 </span>         ) as (mod_flow_fn, del_flow_fn):
+<span class="lnr">588 </span>             self.agent.fdb_remove(None, fdb_entry)
+<span class="lnr">589 </span><span class="Special">-            del_flow_fn.assert_called_with(table=constants.UCAST_TO_TUN,</span>
+<span class="lnr">590 </span><span class="Special">-                                           dl_vlan='vlan2',</span>
+<span class="lnr">591 </span><span class="Special">-                                           dl_dst='mac')</span>
+<span class="lnr">592 </span><span class="Identifier">+            del_flow_fn.assert_has_calls([</span>
+<span class="lnr">593 </span><span class="Identifier">+                mock.call(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">594 </span><span class="Identifier">+                          proto='arp',</span>
+<span class="lnr">595 </span><span class="Identifier">+                          dl_vlan='vlan2',</span>
+<span class="lnr">596 </span><span class="Identifier">+                          nw_dst=FAKE_IP1),</span>
+<span class="lnr">597 </span><span class="Identifier">+                mock.call(table=constants.UCAST_TO_TUN,</span>
+<span class="lnr">598 </span><span class="Identifier">+                          dl_vlan='vlan2',</span>
+<span class="lnr">599 </span><span class="Identifier">+                          dl_dst=FAKE_MAC)</span>
+<span class="lnr">600 </span><span class="Identifier">+            ])</span>
+<span class="lnr">601 </span>             mod_flow_fn.assert_called_with(table=constants.FLOOD_TO_TUN,
+<span class="lnr">602 </span>                                            dl_vlan='vlan2',
+<span class="lnr">603 </span>                                            actions='strip_vlan,'
+<span class="lnr">604 </span><span class="Statement">@@ -592,7 +625,7 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">605 </span>         fdb_entry = {'net1':
+<span class="lnr">606 </span>                      {'network_type': 'gre',
+<span class="lnr">607 </span>                       'segment_id': 'tun1',
+<span class="lnr">608 </span><span class="Special">-                      'ports': {'1.1.1.1': [['mac', 'ip']]}}}</span>
+<span class="lnr">609 </span><span class="Identifier">+                      'ports': {'1.1.1.1': [[FAKE_MAC, FAKE_IP1]]}}}</span>
+<span class="lnr">610 </span>         with contextlib.nested(
+<span class="lnr">611 </span>             mock.patch.object(self.agent.tun_br, 'add_flow'),
+<span class="lnr">612 </span>             mock.patch.object(self.agent.tun_br, 'mod_flow'),
+<span class="lnr">613 </span><span class="Statement">@@ -600,7 +633,7 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">614 </span>         ) as (add_flow_fn, mod_flow_fn, add_tun_fn):
+<span class="lnr">615 </span>             self.agent.fdb_add(None, fdb_entry)
+<span class="lnr">616 </span>             self.assertFalse(add_tun_fn.called)
+<span class="lnr">617 </span><span class="Special">-            fdb_entry['net1']['ports']['10.10.10.10'] = [['mac', 'ip']]</span>
+<span class="lnr">618 </span><span class="Identifier">+            fdb_entry['net1']['ports']['10.10.10.10'] = [[FAKE_MAC, FAKE_IP1]]</span>
+<span class="lnr">619 </span>             self.agent.fdb_add(None, fdb_entry)
+<span class="lnr">620 </span>             add_tun_fn.assert_called_with('gre-0a0a0a0a', '10.10.10.10', 'gre')
+<span class="lnr">621 </span>
+<span class="lnr">622 </span><span class="Statement">@@ -617,6 +650,39 @@</span><span class="PreProc"> class TestOvsNeutronAgent(base.BaseTestCase):</span>
+<span class="lnr">623 </span>             self.agent.fdb_remove(None, fdb_entry)
+<span class="lnr">624 </span>             del_port_fn.assert_called_once_with('gre-02020202')
+<span class="lnr">625 </span>
+<span class="lnr">626 </span><span class="Identifier">+    def test_fdb_update_chg_ip(self):</span>
+<span class="lnr">627 </span><span class="Identifier">+        self._prepare_l2_pop_ofports()</span>
+<span class="lnr">628 </span><span class="Identifier">+        fdb_entries = {'chg_ip':</span>
+<span class="lnr">629 </span><span class="Identifier">+                       {'net1':</span>
+<span class="lnr">630 </span><span class="Identifier">+                        {'agent_ip':</span>
+<span class="lnr">631 </span><span class="Identifier">+                         {'before': [[FAKE_MAC, FAKE_IP1]],</span>
+<span class="lnr">632 </span><span class="Identifier">+                          'after': [[FAKE_MAC, FAKE_IP2]]}}}}</span>
+<span class="lnr">633 </span><span class="Identifier">+        with contextlib.nested(</span>
+<span class="lnr">634 </span><span class="Identifier">+            mock.patch.object(self.agent.tun_br, 'add_flow'),</span>
+<span class="lnr">635 </span><span class="Identifier">+            mock.patch.object(self.agent.tun_br, 'delete_flows')</span>
+<span class="lnr">636 </span><span class="Identifier">+        ) as (add_flow_fn, del_flow_fn):</span>
+<span class="lnr">637 </span><span class="Identifier">+            self.agent.fdb_update(None, fdb_entries)</span>
+<span class="lnr">638 </span><span class="Identifier">+            actions = ('move:NXM_OF_ETH_SRC[]-&gt;NXM_OF_ETH_DST[],'</span>
+<span class="lnr">639 </span><span class="Identifier">+                       'mod_dl_src:%(mac)s,'</span>
+<span class="lnr">640 </span><span class="Identifier">+                       'load:0x2-&gt;NXM_OF_ARP_OP[],'</span>
+<span class="lnr">641 </span><span class="Identifier">+                       'move:NXM_NX_ARP_SHA[]-&gt;NXM_NX_ARP_THA[],'</span>
+<span class="lnr">642 </span><span class="Identifier">+                       'move:NXM_OF_ARP_SPA[]-&gt;NXM_OF_ARP_TPA[],'</span>
+<span class="lnr">643 </span><span class="Identifier">+                       'load:%(mac)#x-&gt;NXM_NX_ARP_SHA[],'</span>
+<span class="lnr">644 </span><span class="Identifier">+                       'load:%(ip)#x-&gt;NXM_OF_ARP_SPA[],'</span>
+<span class="lnr">645 </span><span class="Identifier">+                       'in_port' %</span>
+<span class="lnr">646 </span><span class="Identifier">+                       {'mac': netaddr.EUI(FAKE_MAC, dialect=netaddr.mac_unix),</span>
+<span class="lnr">647 </span><span class="Identifier">+                        'ip': netaddr.IPAddress(FAKE_IP2)})</span>
+<span class="lnr">648 </span><span class="Identifier">+            add_flow_fn.assert_called_once_with(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">649 </span><span class="Identifier">+                                                priority=1,</span>
+<span class="lnr">650 </span><span class="Identifier">+                                                proto='arp',</span>
+<span class="lnr">651 </span><span class="Identifier">+                                                dl_vlan='vlan1',</span>
+<span class="lnr">652 </span><span class="Identifier">+                                                nw_dst=FAKE_IP2,</span>
+<span class="lnr">653 </span><span class="Identifier">+                                                actions=actions)</span>
+<span class="lnr">654 </span><span class="Identifier">+            del_flow_fn.assert_called_once_with(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">655 </span><span class="Identifier">+                                                proto='arp',</span>
+<span class="lnr">656 </span><span class="Identifier">+                                                dl_vlan='vlan1',</span>
+<span class="lnr">657 </span><span class="Identifier">+                                                nw_dst=FAKE_IP1)</span>
+<span class="lnr">658 </span><span class="Identifier">+</span>
+<span class="lnr">659 </span>     def test_recl_lv_port_to_preserve(self):
+<span class="lnr">660 </span>         self._prepare_l2_pop_ofports()
+<span class="lnr">661 </span>         self.agent.l2_pop = True
+<span class="lnr">662 </span><span class="Statement">@@ -772,7 +838,10 @@</span><span class="PreProc"> class AncillaryBridgesTest(base.BaseTestCase):</span>
+<span class="lnr">663 </span>                        return_value=bridges),
+<span class="lnr">664 </span>             mock.patch(
+<span class="lnr">665 </span>                 'neutron.agent.linux.ovs_lib.get_bridge_external_bridge_id',
+<span class="lnr">666 </span><span class="Special">-                side_effect=pullup_side_effect)):</span>
+<span class="lnr">667 </span><span class="Identifier">+                side_effect=pullup_side_effect),</span>
+<span class="lnr">668 </span><span class="Identifier">+            mock.patch('neutron.plugins.openvswitch.agent.ovs_neutron_agent.'</span>
+<span class="lnr">669 </span><span class="Identifier">+                       'OVSNeutronAgent._check_arp_responder_support',</span>
+<span class="lnr">670 </span><span class="Identifier">+                       return_value=True)):</span>
+<span class="lnr">671 </span>             self.agent = ovs_neutron_agent.OVSNeutronAgent(**self.kwargs)
+<span class="lnr">672 </span>             self.assertEqual(len(ancillary), len(self.agent.ancillary_brs))
+<span class="lnr">673 </span>             if ancillary:
+<span class="lnr">674 </span><span class="Type">diff --git a/neutron/tests/unit/openvswitch/test_ovs_tunnel.py b/neutron/tests/unit/openvswitch/test_ovs_tunnel.py</span>
+<span class="lnr">675 </span>index 1940730..8ba7508 100644
+<span class="lnr">676 </span><span class="Type">--- a/neutron/tests/unit/openvswitch/test_ovs_tunnel.py</span>
+<span class="lnr">677 </span><span class="Type">+++ b/neutron/tests/unit/openvswitch/test_ovs_tunnel.py</span>
+<span class="lnr">678 </span><span class="Statement">@@ -73,6 +73,12 @@</span><span class="PreProc"> class TunnelTest(base.BaseTestCase):</span>
+<span class="lnr">679 </span>                               'neutron.openstack.common.rpc.impl_fake')
+<span class="lnr">680 </span>         cfg.CONF.set_override('report_interval', 0, 'AGENT')
+<span class="lnr">681 </span>
+<span class="lnr">682 </span><span class="Identifier">+        check_arp_responder_str = ('neutron.plugins.openvswitch.agent.'</span>
+<span class="lnr">683 </span><span class="Identifier">+                                   'ovs_neutron_agent.OVSNeutronAgent.'</span>
+<span class="lnr">684 </span><span class="Identifier">+                                   '_check_arp_responder_support')</span>
+<span class="lnr">685 </span><span class="Identifier">+        self.mock_check_arp_resp = mock.patch(check_arp_responder_str).start()</span>
+<span class="lnr">686 </span><span class="Identifier">+        self.mock_check_arp_resp.return_value = True</span>
+<span class="lnr">687 </span><span class="Identifier">+</span>
+<span class="lnr">688 </span>         self.INT_BRIDGE = 'integration_bridge'
+<span class="lnr">689 </span>         self.TUN_BRIDGE = 'tunnel_bridge'
+<span class="lnr">690 </span>         self.MAP_TUN_BRIDGE = 'tunnel_bridge_mapping'
+<span class="lnr">691 </span><span class="Statement">@@ -148,12 +154,12 @@</span><span class="PreProc"> class TunnelTest(base.BaseTestCase):</span>
+<span class="lnr">692 </span>                                in_port=self.INT_OFPORT,
+<span class="lnr">693 </span>                                actions=&quot;resubmit(,%s)&quot; %
+<span class="lnr">694 </span>                                constants.PATCH_LV_TO_TUN),
+<span class="lnr">695 </span><span class="Special">-            mock.call.add_flow(priority=0, actions='drop'),</span>
+<span class="lnr">696 </span><span class="Special">-            mock.call.add_flow(table=constants.PATCH_LV_TO_TUN,</span>
+<span class="lnr">697 </span><span class="Identifier">+            mock.call.add_flow(priority=0, actions=&quot;drop&quot;),</span>
+<span class="lnr">698 </span><span class="Identifier">+            mock.call.add_flow(priority=0, table=constants.PATCH_LV_TO_TUN,</span>
+<span class="lnr">699 </span>                                dl_dst=UCAST_MAC,
+<span class="lnr">700 </span>                                actions=&quot;resubmit(,%s)&quot; %
+<span class="lnr">701 </span>                                constants.UCAST_TO_TUN),
+<span class="lnr">702 </span><span class="Special">-            mock.call.add_flow(table=constants.PATCH_LV_TO_TUN,</span>
+<span class="lnr">703 </span><span class="Identifier">+            mock.call.add_flow(priority=0, table=constants.PATCH_LV_TO_TUN,</span>
+<span class="lnr">704 </span>                                dl_dst=BCAST_MAC,
+<span class="lnr">705 </span>                                actions=&quot;resubmit(,%s)&quot; %
+<span class="lnr">706 </span>                                constants.FLOOD_TO_TUN),
+<span class="lnr">707 </span><span class="Statement">@@ -247,6 +253,41 @@</span><span class="PreProc"> class TunnelTest(base.BaseTestCase):</span>
+<span class="lnr">708 </span>                                           self.VETH_MTU)
+<span class="lnr">709 </span>         self._verify_mock_calls()
+<span class="lnr">710 </span>
+<span class="lnr">711 </span><span class="Identifier">+    # TODO(ethuleau): Initially, local ARP responder is be dependent to the</span>
+<span class="lnr">712 </span><span class="Identifier">+    #                 ML2 l2 population mechanism driver.</span>
+<span class="lnr">713 </span><span class="Identifier">+    #                 The next two tests use l2_pop flag to test ARP responder</span>
+<span class="lnr">714 </span><span class="Identifier">+    def test_construct_with_arp_responder(self):</span>
+<span class="lnr">715 </span><span class="Identifier">+        ovs_neutron_agent.OVSNeutronAgent(self.INT_BRIDGE,</span>
+<span class="lnr">716 </span><span class="Identifier">+                                          self.TUN_BRIDGE,</span>
+<span class="lnr">717 </span><span class="Identifier">+                                          '10.0.0.1', self.NET_MAPPING,</span>
+<span class="lnr">718 </span><span class="Identifier">+                                          'sudo', 2, ['gre'],</span>
+<span class="lnr">719 </span><span class="Identifier">+                                          self.VETH_MTU, l2_population=True,</span>
+<span class="lnr">720 </span><span class="Identifier">+                                          arp_responder=True)</span>
+<span class="lnr">721 </span><span class="Identifier">+        self.mock_tun_bridge_expected.insert(</span>
+<span class="lnr">722 </span><span class="Identifier">+            5, mock.call.add_flow(table=constants.PATCH_LV_TO_TUN,</span>
+<span class="lnr">723 </span><span class="Identifier">+                                  priority=1,</span>
+<span class="lnr">724 </span><span class="Identifier">+                                  proto=&quot;arp&quot;,</span>
+<span class="lnr">725 </span><span class="Identifier">+                                  dl_dst=&quot;ff:ff:ff:ff:ff:ff&quot;,</span>
+<span class="lnr">726 </span><span class="Identifier">+                                  actions=&quot;resubmit(,%s)&quot; %</span>
+<span class="lnr">727 </span><span class="Identifier">+                                  constants.ARP_RESPONDER)</span>
+<span class="lnr">728 </span><span class="Identifier">+        )</span>
+<span class="lnr">729 </span><span class="Identifier">+        self.mock_tun_bridge_expected.insert(</span>
+<span class="lnr">730 </span><span class="Identifier">+            12, mock.call.add_flow(table=constants.ARP_RESPONDER,</span>
+<span class="lnr">731 </span><span class="Identifier">+                                   priority=0,</span>
+<span class="lnr">732 </span><span class="Identifier">+                                   actions=&quot;resubmit(,%s)&quot; %</span>
+<span class="lnr">733 </span><span class="Identifier">+                                   constants.FLOOD_TO_TUN)</span>
+<span class="lnr">734 </span><span class="Identifier">+        )</span>
+<span class="lnr">735 </span><span class="Identifier">+        self._verify_mock_calls()</span>
+<span class="lnr">736 </span><span class="Identifier">+</span>
+<span class="lnr">737 </span><span class="Identifier">+    def test_construct_without_arp_responder(self):</span>
+<span class="lnr">738 </span><span class="Identifier">+        ovs_neutron_agent.OVSNeutronAgent(self.INT_BRIDGE,</span>
+<span class="lnr">739 </span><span class="Identifier">+                                          self.TUN_BRIDGE,</span>
+<span class="lnr">740 </span><span class="Identifier">+                                          '10.0.0.1', self.NET_MAPPING,</span>
+<span class="lnr">741 </span><span class="Identifier">+                                          'sudo', 2, ['gre'],</span>
+<span class="lnr">742 </span><span class="Identifier">+                                          self.VETH_MTU, l2_population=False,</span>
+<span class="lnr">743 </span><span class="Identifier">+                                          arp_responder=True)</span>
+<span class="lnr">744 </span><span class="Identifier">+        self._verify_mock_calls()</span>
+<span class="lnr">745 </span><span class="Identifier">+</span>
+<span class="lnr">746 </span>     def test_construct_vxlan(self):
+<span class="lnr">747 </span>         with mock.patch.object(ovs_lib, 'get_installed_ovs_klm_version',
+<span class="lnr">748 </span>                                return_value=&quot;1.10&quot;) as klm_ver:
+</pre>
+</body>
+</html>

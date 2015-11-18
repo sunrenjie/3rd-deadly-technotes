@@ -1,0 +1,31 @@
+How to set alternative npm registry:
+npm config set registry http://registry.cnpmjs.org
+
+How to install phantomjs if the download URL is blocked by GFW?
+Specify alternative download URL, for example:
+env PHANTOMJS_CDNURL=http://npm.taobao.org/dist/phantomjs/ npm install -ddd
+
+====================================================
+How to make AngularJS project End to End tests work?
+AngularJS projects typically use selenium to run e2e tests. The main
+components in question are (again!) blocked by the GFW; on Mac, they are
+chromedriver (OS-specific, architecture-specific, compressed as zip archive
+in distribution [1]) and selenium-server-standalone (java jar file [2]).
+
+Run 'npm run update-webdriver', it will try to download the distribution files
+which shall fail. Stop it by Ctrl+C, re-run the command, it will naively
+report success (previous downloading attempt creates empty files there, a
+second attempt is OK with that and will not try anymore). Now manually
+download the distribution files, put into
+node_modules/protractor/selenium subdirectory in the project directory, then
+extract the former (which is a zip archive). Now we could run 'npm start &'
+and then 'npm run protractor'.
+
+Thanks to guys at Taobao, these distribution files are available in their
+mirror https://npm.taobao.org/mirrors/ at fantastic speed.
+
+[1] The file in question as of writing is chromedriver_mac32.zip on Mac, and
+    chromedriver_linux64.zip on Fedora Linux x86_64.
+[2] The file in question as of writing is
+    selenium-server-standalone-2.45.0.jar.
+

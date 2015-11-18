@@ -1,0 +1,399 @@
+Change Ic89221d0: Bugfix and refactoring for ovs_lib flow methods
+
+Bugfix and refactoring for ovs_lib flow methods
+
+Remove hardcoded flow parameters from
+'_build_flow_expr_str' method, so we can
+define any flows we want and can rely on 'ovs-ofctl'
+command to verify flow arguments correctness.
+When building flow string inside _build_flow_expr_str
+use the following approach:
+1. Build prefix and remove prefix params from flow_dict.
+2. Build postfix (actions) and remove 'actions' from
+flow dict.
+3. Inside the loop build flow array from everything
+what's left in flow_dict.
+4. Append postfix (actions) to the flow array.
+5. 'Join' flow array into flow string.
+
+Change _build_flow_expr_str() to be a function
+instead of an object method because 'self'
+parameter  wasn't used.
+
+Remove 'add_or_mod_flow_str' method because
+we have to use separate logic when bulding flow
+strings for 'add_flow' and 'mod_flow' methods.
+
+Add more unit tests for OVSBridge class.
+
+Closes-Bug: #1255058
+Closes-Bug: #1240572
+
+Change-Id: Ic89221d006a626aa2fc40314a9acffc0ea6fd61c
+
+Comment:
+1. This is a real improvement. It even helped catching an existing 'bug' (see
+   https://review.openstack.org/#/c/82141/). The context is that before this
+   change, flow SET and DELETE calls are quite tolerant in that priority can be
+   set in the call, which also makes sense as all operation requests are
+   forwarded to underlying open vswitch executables. This change tries to
+   comply with the underlying doers and be less tolerant to such calls.
+   The author of this change should have checked all affected calls to
+   eliminate possible bugs resulted in.
+2. Yet the development process is not perfect. The author even updated patch
+   sets because of syntax errors and naive coding quality problems as pointed
+   out by one commenter.
+
+Diff:
+
+diff --git a/neutron/agent/linux/ovs_lib.py b/neutron/agent/linux/ovs_lib.py
+index 37d2787..5428404 100644 (file)
+--- a/neutron/agent/linux/ovs_lib.py
++++ b/neutron/agent/linux/ovs_lib.py
+@@ -20,6 +20,7 @@ from oslo.config import cfg
+ 
+ from neutron.agent.linux import ip_lib
+ from neutron.agent.linux import utils
++from neutron.common import exceptions
+ from neutron.openstack.common import excutils
+ from neutron.openstack.common import jsonutils
+ from neutron.openstack.common import log as logging
+@@ -178,75 +179,26 @@ class OVSBridge(BaseOVS):
+         return self.db_get_val('Bridge',
+                                self.br_name, 'datapath_id').strip('"')
+ 
+-    def _build_flow_expr_arr(self, **kwargs):
+-        flow_expr_arr = []
+-        is_delete_expr = kwargs.get('delete', False)
+-        if not is_delete_expr:
+-            prefix = ("hard_timeout=%s,idle_timeout=%s,priority=%s" %
+-                     (kwargs.get('hard_timeout', '0'),
+-                      kwargs.get('idle_timeout', '0'),
+-                      kwargs.get('priority', '1')))
+-            flow_expr_arr.append(prefix)
+-        elif 'priority' in kwargs:
+-            raise Exception(_("Cannot match priority on flow deletion"))
+-
+-        table = ('table' in kwargs and ",table=%s" %
+-                 kwargs['table'] or '')
+-        in_port = ('in_port' in kwargs and ",in_port=%s" %
+-                   kwargs['in_port'] or '')
+-        dl_type = ('dl_type' in kwargs and ",dl_type=%s" %
+-                   kwargs['dl_type'] or '')
+-        dl_vlan = ('dl_vlan' in kwargs and ",dl_vlan=%s" %
+-                   kwargs['dl_vlan'] or '')
+-        dl_src = 'dl_src' in kwargs and ",dl_src=%s" % kwargs['dl_src'] or ''
+-        dl_dst = 'dl_dst' in kwargs and ",dl_dst=%s" % kwargs['dl_dst'] or ''
+-        nw_src = 'nw_src' in kwargs and ",nw_src=%s" % kwargs['nw_src'] or ''
+-        nw_dst = 'nw_dst' in kwargs and ",nw_dst=%s" % kwargs['nw_dst'] or ''
+-        tun_id = 'tun_id' in kwargs and ",tun_id=%s" % kwargs['tun_id'] or ''
+-        proto = 'proto' in kwargs and ",%s" % kwargs['proto'] or ''
+-        ip = ('nw_src' in kwargs or 'nw_dst' in kwargs) and ',ip' or ''
+-        match = (table + in_port + dl_type + dl_vlan + dl_src + dl_dst +
+-                (proto or ip) + nw_src + nw_dst + tun_id)
+-        if match:
+-            match = match[1:]  # strip leading comma
+-            flow_expr_arr.append(match)
+-        return flow_expr_arr
+-
+-    def add_or_mod_flow_str(self, **kwargs):
+-        if "actions" not in kwargs:
+-            raise Exception(_("Must specify one or more actions"))
+-        if "priority" not in kwargs:
+-            kwargs["priority"] = "0"
+-
+-        flow_expr_arr = self._build_flow_expr_arr(**kwargs)
+-        flow_expr_arr.append("actions=%s" % (kwargs["actions"]))
+-        flow_str = ",".join(flow_expr_arr)
+-        return flow_str
+-
+     def add_flow(self, **kwargs):
+-        flow_str = self.add_or_mod_flow_str(**kwargs)
++        flow_str = _build_flow_expr_str(kwargs, 'add')
+         if self.defer_apply_flows:
+             self.deferred_flows['add'] += flow_str + '\n'
+         else:
+             self.run_ofctl("add-flow", [flow_str])
+ 
+     def mod_flow(self, **kwargs):
+-        flow_str = self.add_or_mod_flow_str(**kwargs)
++        flow_str = _build_flow_expr_str(kwargs, 'mod')
+         if self.defer_apply_flows:
+             self.deferred_flows['mod'] += flow_str + '\n'
+         else:
+             self.run_ofctl("mod-flows", [flow_str])
+ 
+     def delete_flows(self, **kwargs):
+-        kwargs['delete'] = True
+-        flow_expr_arr = self._build_flow_expr_arr(**kwargs)
+-        if "actions" in kwargs:
+-            flow_expr_arr.append("actions=%s" % (kwargs["actions"]))
+-        flow_str = ",".join(flow_expr_arr)
++        flow_expr_str = _build_flow_expr_str(kwargs, 'del')
+         if self.defer_apply_flows:
+-            self.deferred_flows['del'] += flow_str + '\n'
++            self.deferred_flows['del'] += flow_expr_str + '\n'
+         else:
+-            self.run_ofctl("del-flows", [flow_str])
++            self.run_ofctl("del-flows", [flow_expr_str])
+ 
+     def defer_apply_on(self):
+         LOG.debug(_('defer_apply_on'))
+@@ -576,3 +528,37 @@ def check_ovs_vxlan_version(root_helper):
+     _compare_installed_and_required_version(installed_klm_version,
+                                             min_required_version,
+                                             'kernel', 'VXLAN')
++
++
++def _build_flow_expr_str(flow_dict, cmd):
++    flow_expr_arr = []
++    actions = None
++
++    if cmd == 'add':
++        flow_expr_arr.append("hard_timeout=%s" %
++                             flow_dict.pop('hard_timeout', '0'))
++        flow_expr_arr.append("idle_timeout=%s" %
++                             flow_dict.pop('idle_timeout', '0'))
++        flow_expr_arr.append("priority=%s" %
++                             flow_dict.pop('priority', '1'))
++    elif 'priority' in flow_dict:
++        msg = _("Cannot match priority on flow deletion or modification")
++        raise exceptions.InvalidInput(error_message=msg)
++
++    if cmd != 'del':
++        if "actions" not in flow_dict:
++            msg = _("Must specify one or more actions on flow addition"
++                    " or modification")
++            raise exceptions.InvalidInput(error_message=msg)
++        actions = "actions=%s" % flow_dict.pop('actions')
++
++    for key, value in flow_dict.iteritems():
++        if key == 'proto':
++            flow_expr_arr.append(value)
++        else:
++            flow_expr_arr.append("%s=%s" % (key, str(value)))
++
++    if actions:
++        flow_expr_arr.append(actions)
++
++    return ','.join(flow_expr_arr)
+
+Note:
+1. The remove code is awful. It hardcoded too much stuff: all kinds of string
+   concatenations here and there. But the original author was writting the
+   whole functionality; it is easy to be not perfect enough.
+2. The observation that the function _build_flow_expr_str() does not need to be
+   a member function is good.
+3. Now the priority parameter along with DEL or SET is considered an exception,
+   which is reasonable according to ovs−ofctl.8. The code can be imporved
+   further by defining a new exception in a dedicated place and referencing it
+   here.
+
+diff --git a/neutron/tests/unit/openvswitch/test_ovs_lib.py b/neutron/tests/unit/openvswitch/test_ovs_lib.py
+index 5b26e3a..fccd341 100644 (file)
+--- a/neutron/tests/unit/openvswitch/test_ovs_lib.py
++++ b/neutron/tests/unit/openvswitch/test_ovs_lib.py
+@@ -12,12 +12,17 @@
+ #    License for the specific language governing permissions and limitations
+ #    under the License.
+ 
++try:
++    from collections import OrderedDict
++except ImportError:
++    from ordereddict import OrderedDict
+ import mock
+ from oslo.config import cfg
+ import testtools
+ 
+ from neutron.agent.linux import ovs_lib
+ from neutron.agent.linux import utils
++from neutron.common import exceptions
+ from neutron.openstack.common import jsonutils
+ from neutron.openstack.common import uuidutils
+ from neutron.plugins.openvswitch.common import constants
+@@ -207,19 +212,38 @@ class OVS_Lib_Test(base.BaseTestCase):
+         lsw_id = 18
+         cidr = '192.168.1.0/24'
+ 
+-        self.br.add_flow(priority=2, dl_src="ca:fe:de:ad:be:ef",
+-                         actions="strip_vlan,output:0")
+-        self.br.add_flow(priority=1, actions="normal")
+-        self.br.add_flow(priority=2, actions="drop")
+-        self.br.add_flow(priority=2, in_port=ofport, actions="drop")
+-
+-        self.br.add_flow(priority=4, in_port=ofport, dl_vlan=vid,
+-                         actions="strip_vlan,set_tunnel:%s,normal" %
+-                         (lsw_id))
+-        self.br.add_flow(priority=3, tun_id=lsw_id,
+-                         actions="mod_vlan_vid:%s,output:%s" %
+-                         (vid, ofport))
+-        self.br.add_flow(priority=4, proto='arp', nw_src=cidr, actions='drop')
++        flow_dict_1 = OrderedDict([('priority', 2),
++                                   ('dl_src', 'ca:fe:de:ad:be:ef'),
++                                   ('actions', 'strip_vlan,output:0')])
++        flow_dict_2 = OrderedDict([('priority', 1),
++                                   ('actions', 'normal')])
++        flow_dict_3 = OrderedDict([('priority', 2),
++                                   ('actions', 'drop')])
++        flow_dict_4 = OrderedDict([('priority', 2),
++                                   ('in_port', ofport),
++                                   ('actions', 'drop')])
++        flow_dict_5 = OrderedDict([
++            ('priority', 4),
++            ('in_port', ofport),
++            ('dl_vlan', vid),
++            ('actions', "strip_vlan,set_tunnel:%s,normal" % (lsw_id))])
++        flow_dict_6 = OrderedDict([
++            ('priority', 3),
++            ('tun_id', lsw_id),
++            ('actions', "mod_vlan_vid:%s,output:%s" % (vid, ofport))])
++        flow_dict_7 = OrderedDict([
++            ('priority', 4),
++            ('nw_src', cidr),
++            ('proto', 'arp'),
++            ('actions', 'drop')])
++
++        self.br.add_flow(**flow_dict_1)
++        self.br.add_flow(**flow_dict_2)
++        self.br.add_flow(**flow_dict_3)
++        self.br.add_flow(**flow_dict_4)
++        self.br.add_flow(**flow_dict_5)
++        self.br.add_flow(**flow_dict_6)
++        self.br.add_flow(**flow_dict_7)
+         expected_calls = [
+             mock.call(["ovs-ofctl", "add-flow", self.BR_NAME,
+                        "hard_timeout=0,idle_timeout=0,"
+@@ -240,9 +264,9 @@ class OVS_Lib_Test(base.BaseTestCase):
+                       process_input=None, root_helper=self.root_helper),
+             mock.call(["ovs-ofctl", "add-flow", self.BR_NAME,
+                        "hard_timeout=0,idle_timeout=0,"
+-                       "priority=4,in_port=%s,dl_vlan=%s,"
++                       "priority=4,dl_vlan=%s,in_port=%s,"
+                        "actions=strip_vlan,set_tunnel:%s,normal"
+-                       % (ofport, vid, lsw_id)],
++                       % (vid, ofport, lsw_id)],
+                       process_input=None, root_helper=self.root_helper),
+             mock.call(["ovs-ofctl", "add-flow", self.BR_NAME,
+                        "hard_timeout=0,idle_timeout=0,"
+@@ -252,11 +276,34 @@ class OVS_Lib_Test(base.BaseTestCase):
+                       process_input=None, root_helper=self.root_helper),
+             mock.call(["ovs-ofctl", "add-flow", self.BR_NAME,
+                        "hard_timeout=0,idle_timeout=0,"
+-                       "priority=4,arp,nw_src=%s,actions=drop" % cidr],
++                       "priority=4,nw_src=%s,arp,actions=drop" % cidr],
+                       process_input=None, root_helper=self.root_helper),
+         ]
+         self.execute.assert_has_calls(expected_calls)
+ 
++    def test_add_flow_timeout_set(self):
++        flow_dict = OrderedDict([('priority', 1),
++                                 ('hard_timeout', 1000),
++                                 ('idle_timeout', 2000),
++                                 ('actions', 'normal')])
++
++        self.br.add_flow(**flow_dict)
++        self.execute.assert_called_once_with(
++            ["ovs-ofctl", "add-flow", self.BR_NAME,
++             "hard_timeout=1000,idle_timeout=2000,priority=1,actions=normal"],
++            process_input=None,
++            root_helper=self.root_helper)
++
++    def test_add_flow_default_priority(self):
++        flow_dict = OrderedDict([('actions', 'normal')])
++
++        self.br.add_flow(**flow_dict)
++        self.execute.assert_called_once_with(
++            ["ovs-ofctl", "add-flow", self.BR_NAME,
++             "hard_timeout=0,idle_timeout=0,priority=1,actions=normal"],
++            process_input=None,
++            root_helper=self.root_helper)
++
+     def test_get_port_ofport(self):
+         pname = "tap99"
+         ofport = "6"
+@@ -304,27 +351,41 @@ class OVS_Lib_Test(base.BaseTestCase):
+         ]
+         self.execute.assert_has_calls(expected_calls)
+ 
++    def test_delete_flow_with_priority_set(self):
++        params = {'in_port': '1',
++                  'priority': '1'}
++
++        self.assertRaises(exceptions.InvalidInput,
++                          self.br.delete_flows,
++                          **params)
++
++    def test_mod_flow_no_actions_set(self):
++        params = {'in_port': '1'}
++
++        self.assertRaises(exceptions.InvalidInput,
++                          self.br.mod_flow,
++                          **params)
++
+     def test_defer_apply_flows(self):
+-        add_mod_flow = mock.patch.object(self.br,
+-                                         'add_or_mod_flow_str').start()
+-        add_mod_flow.side_effect = ['added_flow_1', 'added_flow_2']
+ 
+-        flow_expr = mock.patch.object(self.br, '_build_flow_expr_arr').start()
+-        flow_expr.return_value = ['deleted_flow_1']
++        flow_expr = mock.patch.object(ovs_lib, '_build_flow_expr_str').start()
++        flow_expr.side_effect = ['added_flow_1', 'added_flow_2',
++                                 'deleted_flow_1']
+         run_ofctl = mock.patch.object(self.br, 'run_ofctl').start()
+ 
+         self.br.defer_apply_on()
+-        self.br.add_flow(flow='added_flow_1')
++        self.br.add_flow(flow='add_flow_1')
+         self.br.defer_apply_on()
+-        self.br.add_flow(flow='added_flow_2')
+-        self.br.delete_flows(flow='deleted_flow_1')
++        self.br.add_flow(flow='add_flow_2')
++        self.br.delete_flows(flow='delete_flow_1')
+         self.br.defer_apply_off()
+ 
+-        add_mod_flow.assert_has_calls([
+-            mock.call(flow='added_flow_1'),
+-            mock.call(flow='added_flow_2')
++        flow_expr.assert_has_calls([
++            mock.call({'flow': 'add_flow_1'}, 'add'),
++            mock.call({'flow': 'add_flow_2'}, 'add'),
++            mock.call({'flow': 'delete_flow_1'}, 'del')
+         ])
+-        flow_expr.assert_called_once_with(delete=True, flow='deleted_flow_1')
++
+         run_ofctl.assert_has_calls([
+             mock.call('add-flows', ['-'], 'added_flow_1\nadded_flow_2\n'),
+             mock.call('del-flows', ['-'], 'deleted_flow_1\n')
+diff --git a/test-requirements.txt b/test-requirements.txt
+index 3e8693c..4ffcb9a 100644 (file)
+--- a/test-requirements.txt
++++ b/test-requirements.txt
+@@ -6,6 +6,7 @@ discover
+ fixtures>=0.3.14
+ mock>=1.0
+ python-subunit>=0.0.18
++ordereddict
+ sphinx>=1.1.2,<1.2
+ testrepository>=0.0.18
+ testtools>=0.9.34
+
+Note:
+1. The idea of separating definition and usage of a large number of instances
+   of a complexty data type is good.
+2. But that introduces another subtlety. The test code ensures that the
+   add_flow() function to generate calls as expected. But the verification
+   involves string equality of hard-coded expected_calls parameter strings and 
+   those generated by _build_flow_expr_str() from the dictionary parameter.
+   This mandates the usage of OrderedDict instead of dict which is the case in
+   patch set 1. OrderedDict is introduced in collections in python 2.7. If that
+   is unavailable, the counterpart from ordereddict is used instead. By the way
+   the original code does not suffer from this problem, as everything is hard
+   coded out there.
+3. Here we see the problem in the error handling in the code being tested. The
+   author opted to use InvalidInput instead of creating a new exception class.
+   Now the test code is happy with InvalidInput without knowing whether this is
+   the exception the author intended. So here comes the rule of thumb: try to
+   customize exception classes to be more specific.
+4. New thing mock.call() came across; noted.
+

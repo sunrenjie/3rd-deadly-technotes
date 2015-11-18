@@ -1,0 +1,17 @@
+
+20130612
+
+We will restart the project of the jos operating system as introduced in the
+course MIT 6.828 Operating System Engineering.
+
+About developing environment
+We will build the OS of gcc+binutils cross-compiling toolchain on mac and run
+the OS in the bochs simulator.
+
+TODO: Our i386-elf-gcc installed via macports failed to generate adequate
+obj/boot/main.o to allow obj/boot/boot to fit in a 512 byte boot sector. The
+reason is unknown. The temp fix is to copy a known boot sector. In the long run,
+however, we would want to remove the 512 byte requirement so that we do not have
+to resort to an external boot sector and could have more powerful and robust
+bootstrap options. UPDATE: fixed by adding '-j' option to objcopy.
+

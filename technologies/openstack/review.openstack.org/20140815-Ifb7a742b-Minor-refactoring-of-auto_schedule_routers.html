@@ -1,0 +1,496 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>20140815-Ifb7a742b-Minor-refactoring-of-auto_schedule_routers.html</title>
+<meta name="Generator" content="Vim/7.3">
+<meta name="plugin-version" content="vim7.3_v6">
+<meta name="syntax" content="git">
+<meta name="settings" content="use_css,number_lines">
+<style type="text/css">
+<!--
+pre { font-family: monospace; color: #000000; background-color: #ffffff; }
+body { font-family: monospace; color: #000000; background-color: #ffffff; }
+.lnr { color: #af5f00; }
+.PreProc { color: #c000c0; }
+.Type { color: #008000; }
+.Special { color: #c000c0; }
+.Constant { color: #c00000; }
+.Identifier { color: #008080; }
+.Statement { color: #af5f00; }
+-->
+</style>
+</head>
+<body>
+<h3>Notes</h3>
+<pre>
+This change is quite straightforward: the function grows out of control, and we
+refactor(split) it into these functionalities:
++ get_enabled_agent_on_host(), returning the (first? or only?) L3 agent on the
+  host, is implemented in class neutron.db.agents_db.AgentDbMixin()
+  (location considered appropriate as this piece is agent specific).
++ get_routers_to_schedule(), returning unscheduled routers, is implemented in
+  the same class. If the router IDs are given, it will get routers via
+  get_routers(), call filter_unscheduled_routers() to filter and remove those
+  that are already hosted by some L3 agent(s) (i.e., having record in
+  RouterL3AgentBinding). Otherwise it will call get_unscheduled_routers() to
+  take all routers that has no record in RouterL3AgentBinding.
+
+  Note that the two newly added subroutines filter_unscheduled_routers() and
+  get_unscheduled_routers() defined in the same class are solely called by
+  this method.
++ get_routers_can_schedule(), filter routers that can be hosted on the L3 agent.
++ bind_routers(), a loop of call to bind_router().
+</pre>
+<hr>
+<pre>
+<span class="lnr">  1 </span><span class="Statement">commit</span> <span class="Identifier">2fc7fd6eb1b7e728b45e6a202cd9011dbb920950</span>
+<span class="lnr">  2 </span><span class="Statement">Author:</span> <span class="Constant">armando-migliaccio </span><span class="Special">&lt;</span><span class="Special">armamig@gmail.com</span><span class="Special">&gt;</span>
+<span class="lnr">  3 </span><span class="Statement">Date:</span>   <span class="Constant">Fri Aug 15 15:55:21 2014 -0700</span>
+<span class="lnr">  4 </span>
+<span class="lnr">  5 </span>    Minor refactoring of auto_schedule_routers
+<span class="lnr">  6 </span>
+<span class="lnr">  7 </span>    The method is more complicated than it needs to be, and it makes it difficult
+<span class="lnr">  8 </span>    to target fixes for it.
+<span class="lnr">  9 </span>
+<span class="lnr"> 10 </span>    This is done in preparation of fix for DB lock timeout errors observed while
+<span class="lnr"> 11 </span>    dealing with DVR routers.
+<span class="lnr"> 12 </span>
+<span class="lnr"> 13 </span>    Test coverage is already provided, and more granular coverage is added to
+<span class="lnr"> 14 </span>    reflect the new structure being introduced.
+<span class="lnr"> 15 </span>
+<span class="lnr"> 16 </span>    Partial-bug: #1356121
+<span class="lnr"> 17 </span>
+<span class="lnr"> 18 </span>    Change-Id: Ifb7a742b64139f3a5d9b88c3c6261b1b890946f9
+<span class="lnr"> 19 </span>---
+<span class="lnr"> 20 </span> neutron/db/agents_db.py                  |  17 +++++++++++++++++
+<span class="lnr"> 21 </span> neutron/scheduler/l3_agent_scheduler.py  | 148 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------
+<span class="lnr"> 22 </span> neutron/tests/unit/db/test_agent_db.py   |  31 +++++++++++++++++++++++++++++++
+<span class="lnr"> 23 </span> neutron/tests/unit/test_l3_schedulers.py | 133 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+<span class="lnr"> 24 </span> 4 files changed, 259 insertions(+), 70 deletions(-)
+<span class="lnr"> 25 </span>
+<span class="lnr"> 26 </span><span class="Type">diff --git a/neutron/db/agents_db.py b/neutron/db/agents_db.py</span>
+<span class="lnr"> 27 </span>index 2325c5e..0a013d5 100644
+<span class="lnr"> 28 </span><span class="Type">--- a/neutron/db/agents_db.py</span>
+<span class="lnr"> 29 </span><span class="Type">+++ b/neutron/db/agents_db.py</span>
+<span class="lnr"> 30 </span><span class="Statement">@@ -82,6 +82,23 @@</span><span class="PreProc"> class AgentDbMixin(ext_agent.AgentPluginBase):</span>
+<span class="lnr"> 31 </span>             raise ext_agent.AgentNotFound(id=id)
+<span class="lnr"> 32 </span>         return agent
+<span class="lnr"> 33 </span>
+<span class="lnr"> 34 </span><span class="Identifier">+    def get_enabled_agent_on_host(self, context, agent_type, host):</span>
+<span class="lnr"> 35 </span><span class="Identifier">+        &quot;&quot;&quot;Return agent of agent_type for the specified host.&quot;&quot;&quot;</span>
+<span class="lnr"> 36 </span><span class="Identifier">+        query = context.session.query(Agent)</span>
+<span class="lnr"> 37 </span><span class="Identifier">+        query = query.filter(Agent.agent_type == agent_type,</span>
+<span class="lnr"> 38 </span><span class="Identifier">+                             Agent.host == host,</span>
+<span class="lnr"> 39 </span><span class="Identifier">+                             Agent.admin_state_up == sql.true())</span>
+<span class="lnr"> 40 </span><span class="Identifier">+        try:</span>
+<span class="lnr"> 41 </span><span class="Identifier">+            agent = query.one()</span>
+<span class="lnr"> 42 </span><span class="Identifier">+        except exc.NoResultFound:</span>
+<span class="lnr"> 43 </span><span class="Identifier">+            LOG.debug('No enabled %(agent_type)s agent on host '</span>
+<span class="lnr"> 44 </span><span class="Identifier">+                      '%(host)s' % {'agent_type': agent_type, 'host': host})</span>
+<span class="lnr"> 45 </span><span class="Identifier">+            return</span>
+<span class="lnr"> 46 </span><span class="Identifier">+        if self.is_agent_down(agent.heartbeat_timestamp):</span>
+<span class="lnr"> 47 </span><span class="Identifier">+            LOG.warn(_('%(agent_type)s agent %(agent_id)s is not active')</span>
+<span class="lnr"> 48 </span><span class="Identifier">+                     % {'agent_type': agent_type, 'agent_id': agent.id})</span>
+<span class="lnr"> 49 </span><span class="Identifier">+        return agent</span>
+<span class="lnr"> 50 </span><span class="Identifier">+</span>
+<span class="lnr"> 51 </span>     @classmethod
+<span class="lnr"> 52 </span>     def is_agent_down(cls, heart_beat_time):
+<span class="lnr"> 53 </span>         return timeutils.is_older_than(heart_beat_time,
+<span class="lnr"> 54 </span><span class="Type">diff --git a/neutron/scheduler/l3_agent_scheduler.py b/neutron/scheduler/l3_agent_scheduler.py</span>
+<span class="lnr"> 55 </span>index 8da4ed7..0f2ed3a 100644
+<span class="lnr"> 56 </span><span class="Type">--- a/neutron/scheduler/l3_agent_scheduler.py</span>
+<span class="lnr"> 57 </span><span class="Type">+++ b/neutron/scheduler/l3_agent_scheduler.py</span>
+<span class="lnr"> 58 </span><span class="Statement">@@ -18,11 +18,9 @@</span><span class="PreProc"> import random</span>
+<span class="lnr"> 59 </span>
+<span class="lnr"> 60 </span> from oslo.db import exception as db_exc
+<span class="lnr"> 61 </span> import six
+<span class="lnr"> 62 </span><span class="Special">-from sqlalchemy.orm import exc</span>
+<span class="lnr"> 63 </span> from sqlalchemy import sql
+<span class="lnr"> 64 </span>
+<span class="lnr"> 65 </span> from neutron.common import constants
+<span class="lnr"> 66 </span><span class="Special">-from neutron.db import agents_db</span>
+<span class="lnr"> 67 </span> from neutron.db import l3_agentschedulers_db
+<span class="lnr"> 68 </span> from neutron.db import l3_db
+<span class="lnr"> 69 </span> from neutron.openstack.common import log as logging
+<span class="lnr"> 70 </span><span class="Statement">@@ -52,89 +50,92 @@</span><span class="PreProc"> class L3Scheduler(object):</span>
+<span class="lnr"> 71 </span>
+<span class="lnr"> 72 </span>         return query.count() &gt; 0
+<span class="lnr"> 73 </span>
+<span class="lnr"> 74 </span><span class="Identifier">+    def filter_unscheduled_routers(self, context, plugin, routers):</span>
+<span class="lnr"> 75 </span><span class="Identifier">+        &quot;&quot;&quot;Filter from list of routers the ones that are not scheduled.&quot;&quot;&quot;</span>
+<span class="lnr"> 76 </span><span class="Identifier">+        unscheduled_routers = []</span>
+<span class="lnr"> 77 </span><span class="Identifier">+        for router in routers:</span>
+<span class="lnr"> 78 </span><span class="Identifier">+            l3_agents = plugin.get_l3_agents_hosting_routers(</span>
+<span class="lnr"> 79 </span><span class="Identifier">+                context, [router['id']], admin_state_up=True)</span>
+<span class="lnr"> 80 </span><span class="Identifier">+            # TODO(armando-migliaccio): remove dvr-related check</span>
+<span class="lnr"> 81 </span><span class="Identifier">+            if l3_agents and not router.get('distributed', False):</span>
+<span class="lnr"> 82 </span><span class="Identifier">+                LOG.debug(('Router %(router_id)s has already been '</span>
+<span class="lnr"> 83 </span><span class="Identifier">+                           'hosted by L3 agent %(agent_id)s'),</span>
+<span class="lnr"> 84 </span><span class="Identifier">+                          {'router_id': router['id'],</span>
+<span class="lnr"> 85 </span><span class="Identifier">+                           'agent_id': l3_agents[0]['id']})</span>
+<span class="lnr"> 86 </span><span class="Identifier">+            else:</span>
+<span class="lnr"> 87 </span><span class="Identifier">+                unscheduled_routers.append(router)</span>
+<span class="lnr"> 88 </span><span class="Identifier">+        return unscheduled_routers</span>
+<span class="lnr"> 89 </span><span class="Identifier">+</span>
+<span class="lnr"> 90 </span><span class="Identifier">+    def get_unscheduled_routers(self, context, plugin):</span>
+<span class="lnr"> 91 </span><span class="Identifier">+        &quot;&quot;&quot;Get routers with no agent binding.&quot;&quot;&quot;</span>
+<span class="lnr"> 92 </span><span class="Identifier">+        # TODO(gongysh) consider the disabled agent's router</span>
+<span class="lnr"> 93 </span><span class="Identifier">+        no_agent_binding = ~sql.exists().where(</span>
+<span class="lnr"> 94 </span><span class="Identifier">+            l3_db.Router.id ==</span>
+<span class="lnr"> 95 </span><span class="Identifier">+            l3_agentschedulers_db.RouterL3AgentBinding.router_id)</span>
+<span class="lnr"> 96 </span><span class="Identifier">+        query = context.session.query(l3_db.Router.id).filter(no_agent_binding)</span>
+<span class="lnr"> 97 </span><span class="Identifier">+        unscheduled_router_ids = [router_id_[0] for router_id_ in query]</span>
+<span class="lnr"> 98 </span><span class="Identifier">+        if unscheduled_router_ids:</span>
+<span class="lnr"> 99 </span><span class="Identifier">+            return plugin.get_routers(</span>
+<span class="lnr">100 </span><span class="Identifier">+                context, filters={'id': unscheduled_router_ids})</span>
+<span class="lnr">101 </span><span class="Identifier">+        return []</span>
+<span class="lnr">102 </span><span class="Identifier">+</span>
+<span class="lnr">103 </span><span class="Identifier">+    def get_routers_to_schedule(self, context, plugin, router_ids=None):</span>
+<span class="lnr">104 </span><span class="Identifier">+        &quot;&quot;&quot;Verify that the routers specified need to be scheduled.</span>
+<span class="lnr">105 </span><span class="Identifier">+</span>
+<span class="lnr">106 </span><span class="Identifier">+        :param context: the context</span>
+<span class="lnr">107 </span><span class="Identifier">+        :param plugin: the core plugin</span>
+<span class="lnr">108 </span><span class="Identifier">+        :param router_ids: the list of routers to be checked for scheduling</span>
+<span class="lnr">109 </span><span class="Identifier">+        :returns: the list of routers to be scheduled</span>
+<span class="lnr">110 </span><span class="Identifier">+        &quot;&quot;&quot;</span>
+<span class="lnr">111 </span><span class="Identifier">+        if router_ids is not None:</span>
+<span class="lnr">112 </span><span class="Identifier">+            routers = plugin.get_routers(context, filters={'id': router_ids})</span>
+<span class="lnr">113 </span><span class="Identifier">+            return self.filter_unscheduled_routers(context, plugin, routers)</span>
+<span class="lnr">114 </span><span class="Identifier">+        else:</span>
+<span class="lnr">115 </span><span class="Identifier">+            return self.get_unscheduled_routers(context, plugin)</span>
+<span class="lnr">116 </span><span class="Identifier">+</span>
+<span class="lnr">117 </span><span class="Identifier">+    def get_routers_can_schedule(self, context, plugin, routers, l3_agent):</span>
+<span class="lnr">118 </span><span class="Identifier">+        &quot;&quot;&quot;Get the subset of routers that can be scheduled on the L3 agent.&quot;&quot;&quot;</span>
+<span class="lnr">119 </span><span class="Identifier">+        ids_to_discard = set()</span>
+<span class="lnr">120 </span><span class="Identifier">+        for router in routers:</span>
+<span class="lnr">121 </span><span class="Identifier">+            # check if the l3 agent is compatible with the router</span>
+<span class="lnr">122 </span><span class="Identifier">+            candidates = plugin.get_l3_agent_candidates(</span>
+<span class="lnr">123 </span><span class="Identifier">+                context, router, [l3_agent])</span>
+<span class="lnr">124 </span><span class="Identifier">+            if not candidates:</span>
+<span class="lnr">125 </span><span class="Identifier">+                ids_to_discard.add(router['id'])</span>
+<span class="lnr">126 </span><span class="Identifier">+</span>
+<span class="lnr">127 </span><span class="Identifier">+        return [r for r in routers if r['id'] not in ids_to_discard]</span>
+<span class="lnr">128 </span><span class="Identifier">+</span>
+<span class="lnr">129 </span>     def auto_schedule_routers(self, plugin, context, host, router_ids):
+<span class="lnr">130 </span>         &quot;&quot;&quot;Schedule non-hosted routers to L3 Agent running on host.
+<span class="lnr">131 </span>
+<span class="lnr">132 </span>         If router_ids is given, each router in router_ids is scheduled
+<span class="lnr">133 </span>         if it is not scheduled yet. Otherwise all unscheduled routers
+<span class="lnr">134 </span>         are scheduled.
+<span class="lnr">135 </span><span class="Special">-        Don't schedule the routers which are hosted already</span>
+<span class="lnr">136 </span><span class="Identifier">+        Do not schedule the routers which are hosted already</span>
+<span class="lnr">137 </span>         by active l3 agents.
+<span class="lnr">138 </span><span class="Identifier">+</span>
+<span class="lnr">139 </span><span class="Identifier">+        :returns: True if routers have been successfully assigned to host</span>
+<span class="lnr">140 </span>         &quot;&quot;&quot;
+<span class="lnr">141 </span>         with context.session.begin(subtransactions=True):
+<span class="lnr">142 </span><span class="Special">-            # query if we have valid l3 agent on the host</span>
+<span class="lnr">143 </span><span class="Special">-            query = context.session.query(agents_db.Agent)</span>
+<span class="lnr">144 </span><span class="Special">-            query = query.filter(agents_db.Agent.agent_type ==</span>
+<span class="lnr">145 </span><span class="Special">-                                 constants.AGENT_TYPE_L3,</span>
+<span class="lnr">146 </span><span class="Special">-                                 agents_db.Agent.host == host,</span>
+<span class="lnr">147 </span><span class="Special">-                                 agents_db.Agent.admin_state_up == sql.true())</span>
+<span class="lnr">148 </span><span class="Special">-            try:</span>
+<span class="lnr">149 </span><span class="Special">-                l3_agent = query.one()</span>
+<span class="lnr">150 </span><span class="Special">-            except (exc.MultipleResultsFound, exc.NoResultFound):</span>
+<span class="lnr">151 </span><span class="Special">-                LOG.debug(_('No enabled L3 agent on host %s'),</span>
+<span class="lnr">152 </span><span class="Special">-                          host)</span>
+<span class="lnr">153 </span><span class="Identifier">+            l3_agent = plugin.get_enabled_agent_on_host(</span>
+<span class="lnr">154 </span><span class="Identifier">+                context, constants.AGENT_TYPE_L3, host)</span>
+<span class="lnr">155 </span><span class="Identifier">+            if not l3_agent:</span>
+<span class="lnr">156 </span>                 return False
+<span class="lnr">157 </span><span class="Special">-            if agents_db.AgentDbMixin.is_agent_down(</span>
+<span class="lnr">158 </span><span class="Special">-                l3_agent.heartbeat_timestamp):</span>
+<span class="lnr">159 </span><span class="Special">-                LOG.warn(_('L3 agent %s is not active'), l3_agent.id)</span>
+<span class="lnr">160 </span><span class="Special">-            # check if each of the specified routers is hosted</span>
+<span class="lnr">161 </span><span class="Special">-            if router_ids:</span>
+<span class="lnr">162 </span><span class="Special">-                routers = plugin.get_routers(</span>
+<span class="lnr">163 </span><span class="Special">-                    context, filters={'id': router_ids})</span>
+<span class="lnr">164 </span><span class="Special">-                unscheduled_routers = []</span>
+<span class="lnr">165 </span><span class="Special">-                for router in routers:</span>
+<span class="lnr">166 </span><span class="Special">-                    l3_agents = plugin.get_l3_agents_hosting_routers(</span>
+<span class="lnr">167 </span><span class="Special">-                        context, [router['id']], admin_state_up=True)</span>
+<span class="lnr">168 </span><span class="Special">-                    if l3_agents and not router.get('distributed', False):</span>
+<span class="lnr">169 </span><span class="Special">-                        LOG.debug(_('Router %(router_id)s has already been'</span>
+<span class="lnr">170 </span><span class="Special">-                                    ' hosted by L3 agent %(agent_id)s'),</span>
+<span class="lnr">171 </span><span class="Special">-                                  {'router_id': router['id'],</span>
+<span class="lnr">172 </span><span class="Special">-                                   'agent_id': l3_agents[0]['id']})</span>
+<span class="lnr">173 </span><span class="Special">-                    else:</span>
+<span class="lnr">174 </span><span class="Special">-                        unscheduled_routers.append(router)</span>
+<span class="lnr">175 </span><span class="Special">-                if not unscheduled_routers:</span>
+<span class="lnr">176 </span><span class="Special">-                    # all (specified) routers are already scheduled</span>
+<span class="lnr">177 </span><span class="Special">-                    return False</span>
+<span class="lnr">178 </span><span class="Special">-            else:</span>
+<span class="lnr">179 </span><span class="Special">-                # get all routers that are not hosted</span>
+<span class="lnr">180 </span><span class="Special">-                #TODO(gongysh) consider the disabled agent's router</span>
+<span class="lnr">181 </span><span class="Special">-                stmt = ~sql.exists().where(</span>
+<span class="lnr">182 </span><span class="Special">-                    l3_db.Router.id ==</span>
+<span class="lnr">183 </span><span class="Special">-                    l3_agentschedulers_db.RouterL3AgentBinding.router_id)</span>
+<span class="lnr">184 </span><span class="Special">-                unscheduled_router_ids = [router_id_[0] for router_id_ in</span>
+<span class="lnr">185 </span><span class="Special">-                                          context.session.query(</span>
+<span class="lnr">186 </span><span class="Special">-                                              l3_db.Router.id).filter(stmt)]</span>
+<span class="lnr">187 </span><span class="Special">-                if not unscheduled_router_ids:</span>
+<span class="lnr">188 </span><span class="Special">-                    LOG.debug(_('No non-hosted routers'))</span>
+<span class="lnr">189 </span><span class="Special">-                    return False</span>
+<span class="lnr">190 </span><span class="Special">-                unscheduled_routers = plugin.get_routers(</span>
+<span class="lnr">191 </span><span class="Special">-                    context, filters={'id': unscheduled_router_ids})</span>
+<span class="lnr">192 </span><span class="Special">-</span>
+<span class="lnr">193 </span><span class="Special">-            # check if the configuration of l3 agent is compatible</span>
+<span class="lnr">194 </span><span class="Special">-            # with the router</span>
+<span class="lnr">195 </span><span class="Special">-            to_removed_ids = set()</span>
+<span class="lnr">196 </span><span class="Special">-            for router in unscheduled_routers:</span>
+<span class="lnr">197 </span><span class="Special">-                candidates = plugin.get_l3_agent_candidates(context,</span>
+<span class="lnr">198 </span><span class="Special">-                                                            router,</span>
+<span class="lnr">199 </span><span class="Special">-                                                            [l3_agent])</span>
+<span class="lnr">200 </span><span class="Special">-                if not candidates:</span>
+<span class="lnr">201 </span><span class="Special">-                    to_removed_ids.add(router['id'])</span>
+<span class="lnr">202 </span><span class="Special">-</span>
+<span class="lnr">203 </span><span class="Special">-            target_routers = [r for r in unscheduled_routers</span>
+<span class="lnr">204 </span><span class="Special">-                              if r['id'] not in to_removed_ids]</span>
+<span class="lnr">205 </span><span class="Identifier">+</span>
+<span class="lnr">206 </span><span class="Identifier">+            unscheduled_routers = self.get_routers_to_schedule(</span>
+<span class="lnr">207 </span><span class="Identifier">+                context, plugin, router_ids)</span>
+<span class="lnr">208 </span><span class="Identifier">+            if not unscheduled_routers:</span>
+<span class="lnr">209 </span><span class="Identifier">+                return False</span>
+<span class="lnr">210 </span><span class="Identifier">+</span>
+<span class="lnr">211 </span><span class="Identifier">+            target_routers = self.get_routers_can_schedule(</span>
+<span class="lnr">212 </span><span class="Identifier">+                context, plugin, unscheduled_routers, l3_agent)</span>
+<span class="lnr">213 </span>             if not target_routers:
+<span class="lnr">214 </span>                 LOG.warn(_('No routers compatible with L3 agent configuration'
+<span class="lnr">215 </span>                            ' on host %s'), host)
+<span class="lnr">216 </span>                 return False
+<span class="lnr">217 </span>
+<span class="lnr">218 </span><span class="Special">-            for router_dict in target_routers:</span>
+<span class="lnr">219 </span><span class="Special">-                if (router_dict.get('distributed', False)</span>
+<span class="lnr">220 </span><span class="Special">-                    and self.dvr_has_binding(context,</span>
+<span class="lnr">221 </span><span class="Special">-                                             router_dict['id'],</span>
+<span class="lnr">222 </span><span class="Special">-                                             l3_agent.id)):</span>
+<span class="lnr">223 </span><span class="Special">-                    continue</span>
+<span class="lnr">224 </span><span class="Special">-                self.bind_router(context, router_dict['id'], l3_agent)</span>
+<span class="lnr">225 </span><span class="Special">-        return True</span>
+<span class="lnr">226 </span><span class="Identifier">+            self.bind_routers(context, target_routers, l3_agent)</span>
+<span class="lnr">227 </span><span class="Identifier">+            return True</span>
+<span class="lnr">228 </span>
+<span class="lnr">229 </span>     def get_candidates(self, plugin, context, sync_router, subnet_id):
+<span class="lnr">230 </span>         &quot;&quot;&quot;Return L3 agents where a router could be scheduled.&quot;&quot;&quot;
+<span class="lnr">231 </span><span class="Statement">@@ -173,6 +174,13 @@</span><span class="PreProc"> class L3Scheduler(object):</span>
+<span class="lnr">232 </span>
+<span class="lnr">233 </span>             return candidates
+<span class="lnr">234 </span>
+<span class="lnr">235 </span><span class="Identifier">+    def bind_routers(self, context, routers, l3_agent):</span>
+<span class="lnr">236 </span><span class="Identifier">+        for router in routers:</span>
+<span class="lnr">237 </span><span class="Identifier">+            if (router.get('distributed', False) and</span>
+<span class="lnr">238 </span><span class="Identifier">+                self.dvr_has_binding(context, router['id'], l3_agent.id)):</span>
+<span class="lnr">239 </span><span class="Identifier">+                    continue</span>
+<span class="lnr">240 </span><span class="Identifier">+            self.bind_router(context, router['id'], l3_agent)</span>
+<span class="lnr">241 </span><span class="Identifier">+</span>
+<span class="lnr">242 </span>     def bind_router(self, context, router_id, chosen_agent):
+<span class="lnr">243 </span>         &quot;&quot;&quot;Bind the router to the l3 agent which has been chosen.&quot;&quot;&quot;
+<span class="lnr">244 </span>         try:
+<span class="lnr">245 </span><span class="Type">diff --git a/neutron/tests/unit/db/test_agent_db.py b/neutron/tests/unit/db/test_agent_db.py</span>
+<span class="lnr">246 </span>index 529cd85..b2db78b 100644
+<span class="lnr">247 </span><span class="Type">--- a/neutron/tests/unit/db/test_agent_db.py</span>
+<span class="lnr">248 </span><span class="Type">+++ b/neutron/tests/unit/db/test_agent_db.py</span>
+<span class="lnr">249 </span><span class="Statement">@@ -16,9 +16,11 @@</span>
+<span class="lnr">250 </span> import mock
+<span class="lnr">251 </span> from oslo.db import exception as exc
+<span class="lnr">252 </span>
+<span class="lnr">253 </span><span class="Identifier">+from neutron.common import constants</span>
+<span class="lnr">254 </span> from neutron import context
+<span class="lnr">255 </span> from neutron.db import agents_db
+<span class="lnr">256 </span> from neutron.db import db_base_plugin_v2 as base_plugin
+<span class="lnr">257 </span><span class="Identifier">+from neutron.openstack.common import timeutils</span>
+<span class="lnr">258 </span> from neutron.tests.unit import testlib_api
+<span class="lnr">259 </span>
+<span class="lnr">260 </span>
+<span class="lnr">261 </span><span class="Statement">@@ -40,6 +42,35 @@</span><span class="PreProc"> class TestAgentsDbMixin(testlib_api.SqlTestCase):</span>
+<span class="lnr">262 </span>             'topic': 'N/A'
+<span class="lnr">263 </span>         }
+<span class="lnr">264 </span>
+<span class="lnr">265 </span><span class="Identifier">+    def _add_agent(self, agent_id, agent_type, agent_host):</span>
+<span class="lnr">266 </span><span class="Identifier">+        with self.context.session.begin(subtransactions=True):</span>
+<span class="lnr">267 </span><span class="Identifier">+            now = timeutils.utcnow()</span>
+<span class="lnr">268 </span><span class="Identifier">+            agent = agents_db.Agent(id=agent_id,</span>
+<span class="lnr">269 </span><span class="Identifier">+                                    agent_type=agent_type,</span>
+<span class="lnr">270 </span><span class="Identifier">+                                    binary='foo_binary',</span>
+<span class="lnr">271 </span><span class="Identifier">+                                    topic='foo_topic',</span>
+<span class="lnr">272 </span><span class="Identifier">+                                    host=agent_host,</span>
+<span class="lnr">273 </span><span class="Identifier">+                                    created_at=now,</span>
+<span class="lnr">274 </span><span class="Identifier">+                                    started_at=now,</span>
+<span class="lnr">275 </span><span class="Identifier">+                                    admin_state_up=True,</span>
+<span class="lnr">276 </span><span class="Identifier">+                                    heartbeat_timestamp=now,</span>
+<span class="lnr">277 </span><span class="Identifier">+                                    configurations='')</span>
+<span class="lnr">278 </span><span class="Identifier">+            self.context.session.add(agent)</span>
+<span class="lnr">279 </span><span class="Identifier">+            return agent</span>
+<span class="lnr">280 </span><span class="Identifier">+</span>
+<span class="lnr">281 </span><span class="Identifier">+    def test_get_enabled_agent_on_host_found(self):</span>
+<span class="lnr">282 </span><span class="Identifier">+        agent = self._add_agent('foo_id', constants.AGENT_TYPE_L3, 'foo_host')</span>
+<span class="lnr">283 </span><span class="Identifier">+        expected = self.plugin.get_enabled_agent_on_host(</span>
+<span class="lnr">284 </span><span class="Identifier">+            self.context, constants.AGENT_TYPE_L3, 'foo_host')</span>
+<span class="lnr">285 </span><span class="Identifier">+        self.assertEqual(expected, agent)</span>
+<span class="lnr">286 </span><span class="Identifier">+</span>
+<span class="lnr">287 </span><span class="Identifier">+    def test_get_enabled_agent_on_host_not_found(self):</span>
+<span class="lnr">288 </span><span class="Identifier">+        with mock.patch.object(agents_db.LOG, 'debug') as mock_log:</span>
+<span class="lnr">289 </span><span class="Identifier">+            agent = self.plugin.get_enabled_agent_on_host(</span>
+<span class="lnr">290 </span><span class="Identifier">+                self.context, constants.AGENT_TYPE_L3, 'foo_agent')</span>
+<span class="lnr">291 </span><span class="Identifier">+        self.assertIsNone(agent)</span>
+<span class="lnr">292 </span><span class="Identifier">+        self.assertTrue(mock_log.called)</span>
+<span class="lnr">293 </span><span class="Identifier">+</span>
+<span class="lnr">294 </span>     def _assert_ref_fields_are_equal(self, reference, result):
+<span class="lnr">295 </span>         &quot;&quot;&quot;Compare (key, value) pairs of a reference dict with the result
+<span class="lnr">296 </span>
+<span class="lnr">297 </span><span class="Type">diff --git a/neutron/tests/unit/test_l3_schedulers.py b/neutron/tests/unit/test_l3_schedulers.py</span>
+<span class="lnr">298 </span>index d329def..1470159 100644
+<span class="lnr">299 </span><span class="Type">--- a/neutron/tests/unit/test_l3_schedulers.py</span>
+<span class="lnr">300 </span><span class="Type">+++ b/neutron/tests/unit/test_l3_schedulers.py</span>
+<span class="lnr">301 </span><span class="Statement">@@ -35,6 +35,7 @@</span><span class="PreProc"> from neutron.extensions import l3 as ext_l3</span>
+<span class="lnr">302 </span> from neutron import manager
+<span class="lnr">303 </span> from neutron.openstack.common import timeutils
+<span class="lnr">304 </span> from neutron.scheduler import l3_agent_scheduler
+<span class="lnr">305 </span><span class="Identifier">+from neutron.tests import base</span>
+<span class="lnr">306 </span> from neutron.tests.unit import test_db_plugin
+<span class="lnr">307 </span> from neutron.tests.unit import test_l3_plugin
+<span class="lnr">308 </span> from neutron.tests.unit import testlib_api
+<span class="lnr">309 </span><span class="Statement">@@ -83,6 +84,138 @@</span><span class="PreProc"> DB_PLUGIN_KLASS = ('neutron.plugins.openvswitch.ovs_neutron_plugin.'</span>
+<span class="lnr">310 </span>                    'OVSNeutronPluginV2')
+<span class="lnr">311 </span>
+<span class="lnr">312 </span>
+<span class="lnr">313 </span><span class="Identifier">+class FakeL3Scheduler(l3_agent_scheduler.L3Scheduler):</span>
+<span class="lnr">314 </span><span class="Identifier">+</span>
+<span class="lnr">315 </span><span class="Identifier">+    def schedule(self):</span>
+<span class="lnr">316 </span><span class="Identifier">+        pass</span>
+<span class="lnr">317 </span><span class="Identifier">+</span>
+<span class="lnr">318 </span><span class="Identifier">+    def _choose_router_agent(self):</span>
+<span class="lnr">319 </span><span class="Identifier">+        pass</span>
+<span class="lnr">320 </span><span class="Identifier">+</span>
+<span class="lnr">321 </span><span class="Identifier">+</span>
+<span class="lnr">322 </span><span class="Identifier">+class L3SchedulerBaseTestCase(base.BaseTestCase):</span>
+<span class="lnr">323 </span><span class="Identifier">+</span>
+<span class="lnr">324 </span><span class="Identifier">+    def setUp(self):</span>
+<span class="lnr">325 </span><span class="Identifier">+        super(L3SchedulerBaseTestCase, self).setUp()</span>
+<span class="lnr">326 </span><span class="Identifier">+        self.scheduler = FakeL3Scheduler()</span>
+<span class="lnr">327 </span><span class="Identifier">+        self.plugin = mock.Mock()</span>
+<span class="lnr">328 </span><span class="Identifier">+        self.context = q_context.get_admin_context()</span>
+<span class="lnr">329 </span><span class="Identifier">+</span>
+<span class="lnr">330 </span><span class="Identifier">+    def test_auto_schedule_routers(self):</span>
+<span class="lnr">331 </span><span class="Identifier">+        self.plugin.get_enabled_agent_on_host.return_value = [mock.ANY]</span>
+<span class="lnr">332 </span><span class="Identifier">+        with contextlib.nested(</span>
+<span class="lnr">333 </span><span class="Identifier">+            mock.patch.object(self.scheduler, 'get_routers_to_schedule'),</span>
+<span class="lnr">334 </span><span class="Identifier">+            mock.patch.object(self.scheduler, 'get_routers_can_schedule')) as (</span>
+<span class="lnr">335 </span><span class="Identifier">+            gs, gr):</span>
+<span class="lnr">336 </span><span class="Identifier">+            result = self.scheduler.auto_schedule_routers(</span>
+<span class="lnr">337 </span><span class="Identifier">+                self.plugin, self.context, mock.ANY, mock.ANY)</span>
+<span class="lnr">338 </span><span class="Identifier">+        self.assertTrue(self.plugin.get_enabled_agent_on_host.called)</span>
+<span class="lnr">339 </span><span class="Identifier">+        self.assertTrue(result)</span>
+<span class="lnr">340 </span><span class="Identifier">+        self.assertTrue(gs.called)</span>
+<span class="lnr">341 </span><span class="Identifier">+        self.assertTrue(gr.called)</span>
+<span class="lnr">342 </span><span class="Identifier">+</span>
+<span class="lnr">343 </span><span class="Identifier">+    def test_auto_schedule_routers_no_agents(self):</span>
+<span class="lnr">344 </span><span class="Identifier">+        self.plugin.get_enabled_agent_on_host.return_value = None</span>
+<span class="lnr">345 </span><span class="Identifier">+        result = self.scheduler.auto_schedule_routers(</span>
+<span class="lnr">346 </span><span class="Identifier">+            self.plugin, self.context, mock.ANY, mock.ANY)</span>
+<span class="lnr">347 </span><span class="Identifier">+        self.assertTrue(self.plugin.get_enabled_agent_on_host.called)</span>
+<span class="lnr">348 </span><span class="Identifier">+        self.assertFalse(result)</span>
+<span class="lnr">349 </span><span class="Identifier">+</span>
+<span class="lnr">350 </span><span class="Identifier">+    def test_auto_schedule_routers_no_unscheduled_routers(self):</span>
+<span class="lnr">351 </span><span class="Identifier">+        with mock.patch.object(self.scheduler,</span>
+<span class="lnr">352 </span><span class="Identifier">+                               'get_routers_to_schedule') as mock_routers:</span>
+<span class="lnr">353 </span><span class="Identifier">+            mock_routers.return_value = None</span>
+<span class="lnr">354 </span><span class="Identifier">+            result = self.scheduler.auto_schedule_routers(</span>
+<span class="lnr">355 </span><span class="Identifier">+                self.plugin, self.context, mock.ANY, mock.ANY)</span>
+<span class="lnr">356 </span><span class="Identifier">+        self.assertTrue(self.plugin.get_enabled_agent_on_host.called)</span>
+<span class="lnr">357 </span><span class="Identifier">+        self.assertFalse(result)</span>
+<span class="lnr">358 </span><span class="Identifier">+</span>
+<span class="lnr">359 </span><span class="Identifier">+    def test_auto_schedule_routers_no_target_routers(self):</span>
+<span class="lnr">360 </span><span class="Identifier">+        self.plugin.get_enabled_agent_on_host.return_value = [mock.ANY]</span>
+<span class="lnr">361 </span><span class="Identifier">+        with contextlib.nested(</span>
+<span class="lnr">362 </span><span class="Identifier">+            mock.patch.object(self.scheduler, 'get_routers_to_schedule'),</span>
+<span class="lnr">363 </span><span class="Identifier">+            mock.patch.object(self.scheduler, 'get_routers_can_schedule')) as (</span>
+<span class="lnr">364 </span><span class="Identifier">+            mock_unscheduled_routers, mock_target_routers):</span>
+<span class="lnr">365 </span><span class="Identifier">+            mock_unscheduled_routers.return_value = mock.ANY</span>
+<span class="lnr">366 </span><span class="Identifier">+            mock_target_routers.return_value = None</span>
+<span class="lnr">367 </span><span class="Identifier">+            result = self.scheduler.auto_schedule_routers(</span>
+<span class="lnr">368 </span><span class="Identifier">+                self.plugin, self.context, mock.ANY, mock.ANY)</span>
+<span class="lnr">369 </span><span class="Identifier">+        self.assertTrue(self.plugin.get_enabled_agent_on_host.called)</span>
+<span class="lnr">370 </span><span class="Identifier">+        self.assertFalse(result)</span>
+<span class="lnr">371 </span><span class="Identifier">+</span>
+<span class="lnr">372 </span><span class="Identifier">+    def test_get_routers_to_schedule_with_router_ids(self):</span>
+<span class="lnr">373 </span><span class="Identifier">+        router_ids = ['foo_router_1', 'foo_router_2']</span>
+<span class="lnr">374 </span><span class="Identifier">+        expected_routers = [</span>
+<span class="lnr">375 </span><span class="Identifier">+            {'id': 'foo_router1'}, {'id': 'foo_router_2'}</span>
+<span class="lnr">376 </span><span class="Identifier">+        ]</span>
+<span class="lnr">377 </span><span class="Identifier">+        self.plugin.get_routers.return_value = expected_routers</span>
+<span class="lnr">378 </span><span class="Identifier">+        with mock.patch.object(self.scheduler,</span>
+<span class="lnr">379 </span><span class="Identifier">+                               'filter_unscheduled_routers') as mock_filter:</span>
+<span class="lnr">380 </span><span class="Identifier">+            mock_filter.return_value = expected_routers</span>
+<span class="lnr">381 </span><span class="Identifier">+            unscheduled_routers = self.scheduler.get_routers_to_schedule(</span>
+<span class="lnr">382 </span><span class="Identifier">+                mock.ANY, self.plugin, router_ids)</span>
+<span class="lnr">383 </span><span class="Identifier">+        mock_filter.assert_called_once_with(</span>
+<span class="lnr">384 </span><span class="Identifier">+            mock.ANY, self.plugin, expected_routers)</span>
+<span class="lnr">385 </span><span class="Identifier">+        self.assertEqual(expected_routers, unscheduled_routers)</span>
+<span class="lnr">386 </span><span class="Identifier">+</span>
+<span class="lnr">387 </span><span class="Identifier">+    def test_get_routers_to_schedule_without_router_ids(self):</span>
+<span class="lnr">388 </span><span class="Identifier">+        expected_routers = [</span>
+<span class="lnr">389 </span><span class="Identifier">+            {'id': 'foo_router1'}, {'id': 'foo_router_2'}</span>
+<span class="lnr">390 </span><span class="Identifier">+        ]</span>
+<span class="lnr">391 </span><span class="Identifier">+        with mock.patch.object(self.scheduler,</span>
+<span class="lnr">392 </span><span class="Identifier">+                               'get_unscheduled_routers') as mock_get:</span>
+<span class="lnr">393 </span><span class="Identifier">+            mock_get.return_value = expected_routers</span>
+<span class="lnr">394 </span><span class="Identifier">+            unscheduled_routers = self.scheduler.get_routers_to_schedule(</span>
+<span class="lnr">395 </span><span class="Identifier">+                mock.ANY, self.plugin)</span>
+<span class="lnr">396 </span><span class="Identifier">+        mock_get.assert_called_once_with(mock.ANY, self.plugin)</span>
+<span class="lnr">397 </span><span class="Identifier">+        self.assertEqual(expected_routers, unscheduled_routers)</span>
+<span class="lnr">398 </span><span class="Identifier">+</span>
+<span class="lnr">399 </span><span class="Identifier">+    def _test_get_routers_can_schedule(self, routers, agent, target_routers):</span>
+<span class="lnr">400 </span><span class="Identifier">+        self.plugin.get_l3_agent_candidates.return_value = agent</span>
+<span class="lnr">401 </span><span class="Identifier">+        result = self.scheduler.get_routers_can_schedule(</span>
+<span class="lnr">402 </span><span class="Identifier">+            mock.ANY, self.plugin, routers, mock.ANY)</span>
+<span class="lnr">403 </span><span class="Identifier">+        self.assertEqual(target_routers, result)</span>
+<span class="lnr">404 </span><span class="Identifier">+</span>
+<span class="lnr">405 </span><span class="Identifier">+    def _test_filter_unscheduled_routers(self, routers, agents, expected):</span>
+<span class="lnr">406 </span><span class="Identifier">+        self.plugin.get_l3_agents_hosting_routers.return_value = agents</span>
+<span class="lnr">407 </span><span class="Identifier">+        unscheduled_routers = self.scheduler.filter_unscheduled_routers(</span>
+<span class="lnr">408 </span><span class="Identifier">+            mock.ANY, self.plugin, routers)</span>
+<span class="lnr">409 </span><span class="Identifier">+        self.assertEqual(expected, unscheduled_routers)</span>
+<span class="lnr">410 </span><span class="Identifier">+</span>
+<span class="lnr">411 </span><span class="Identifier">+    def test_filter_unscheduled_routers_already_scheduled(self):</span>
+<span class="lnr">412 </span><span class="Identifier">+        self._test_filter_unscheduled_routers(</span>
+<span class="lnr">413 </span><span class="Identifier">+            [{'id': 'foo_router1'}, {'id': 'foo_router_2'}],</span>
+<span class="lnr">414 </span><span class="Identifier">+            [{'id': 'foo_agent_id'}], [])</span>
+<span class="lnr">415 </span><span class="Identifier">+</span>
+<span class="lnr">416 </span><span class="Identifier">+    def test_filter_unscheduled_routers_non_scheduled(self):</span>
+<span class="lnr">417 </span><span class="Identifier">+        self._test_filter_unscheduled_routers(</span>
+<span class="lnr">418 </span><span class="Identifier">+            [{'id': 'foo_router1'}, {'id': 'foo_router_2'}],</span>
+<span class="lnr">419 </span><span class="Identifier">+            None, [{'id': 'foo_router1'}, {'id': 'foo_router_2'}])</span>
+<span class="lnr">420 </span><span class="Identifier">+</span>
+<span class="lnr">421 </span><span class="Identifier">+    def test_get_routers_can_schedule_with_compat_agent(self):</span>
+<span class="lnr">422 </span><span class="Identifier">+        routers = [{'id': 'foo_router'}]</span>
+<span class="lnr">423 </span><span class="Identifier">+        self._test_get_routers_can_schedule(routers, mock.ANY, routers)</span>
+<span class="lnr">424 </span><span class="Identifier">+</span>
+<span class="lnr">425 </span><span class="Identifier">+    def test_get_routers_can_schedule_with_no_compat_agent(self):</span>
+<span class="lnr">426 </span><span class="Identifier">+        routers = [{'id': 'foo_router'}]</span>
+<span class="lnr">427 </span><span class="Identifier">+        self._test_get_routers_can_schedule(routers, None, [])</span>
+<span class="lnr">428 </span><span class="Identifier">+</span>
+<span class="lnr">429 </span><span class="Identifier">+    def test_bind_routers_centralized(self):</span>
+<span class="lnr">430 </span><span class="Identifier">+        routers = [{'id': 'foo_router'}]</span>
+<span class="lnr">431 </span><span class="Identifier">+        with mock.patch.object(self.scheduler, 'bind_router') as mock_bind:</span>
+<span class="lnr">432 </span><span class="Identifier">+            self.scheduler.bind_routers(mock.ANY, routers, mock.ANY)</span>
+<span class="lnr">433 </span><span class="Identifier">+        mock_bind.assert_called_once_with(mock.ANY, 'foo_router', mock.ANY)</span>
+<span class="lnr">434 </span><span class="Identifier">+</span>
+<span class="lnr">435 </span><span class="Identifier">+    def test_bind_routers_dvr(self):</span>
+<span class="lnr">436 </span><span class="Identifier">+        routers = [{'id': 'foo_router', 'distributed': True}]</span>
+<span class="lnr">437 </span><span class="Identifier">+        agent = agents_db.Agent(id='foo_agent')</span>
+<span class="lnr">438 </span><span class="Identifier">+        with mock.patch.object(self.scheduler, 'dvr_has_binding') as mock_dvr:</span>
+<span class="lnr">439 </span><span class="Identifier">+            with mock.patch.object(self.scheduler, 'bind_router') as mock_bind:</span>
+<span class="lnr">440 </span><span class="Identifier">+                self.scheduler.bind_routers(mock.ANY, routers, agent)</span>
+<span class="lnr">441 </span><span class="Identifier">+        mock_dvr.assert_called_once_with(mock.ANY, 'foo_router', 'foo_agent')</span>
+<span class="lnr">442 </span><span class="Identifier">+        self.assertFalse(mock_bind.called)</span>
+<span class="lnr">443 </span><span class="Identifier">+</span>
+<span class="lnr">444 </span><span class="Identifier">+</span>
+<span class="lnr">445 </span> class L3SchedulerTestExtensionManager(object):
+<span class="lnr">446 </span>
+<span class="lnr">447 </span>     def get_resources(self):
+</pre>
+</body>
+</html>

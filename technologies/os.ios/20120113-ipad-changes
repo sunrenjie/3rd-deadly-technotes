@@ -1,0 +1,60 @@
+
+Changes made to my iPad (iOS 4.3.3)
+
+1. Jailbreaked (http://www.jailbreakme.com) with several software installed from
+   Cydia: openSSH server, apt-get
+2. Changed the root passwd according to Cydia's recommendation.
+3. Now ready to copy the first 'hello world' C program to it to run.
+4. Compiled and installed (to /usr/local/) the following GNU software:
+   coreutils, sed, awk, wget
+
+
+More info about my iPad2:
+1. Apple Applications are installed at /Applications/;
+   others at /private/var/mobile/Applications/
+
+2. nandu-daily is installed at 88697BE7-368D-4FF6-807F-55302E2B351F
+
+3. nanfang renwu zhoukan is installed at C5279B77-B83A-425D-9147-D1004011A2B2
+
+This app doubles disk usage in the way that it keeps both an archived .mag file
+and extracted contents for each issue. We could move all .mag files out.
+
+4. others
+
+61DDF191-1252-4B4F-B832-FB89D0614750: DOSBOX
+D6FF313F-6749-4D9B-974F-74981CBA2C4D: ezPDFReader
+
+5. scripting-based statistics
+
+All files are written to /Applications/Utilities/.
+
+# pwd=/private/var/mobile/Applications/
+# figure out which apps have too many files
+ls -1 | awk 'BEGIN{n=1}{print n "\t" $1; n++}' | sed 1,66d | while read l;do du -hs $l; done
+
+# generate du report for all apps
+du -s * > /Applications/Utilities/apps.du-s
+
+# generate mapping between apps and dirs:
+cat /Applications/Utilities/apps.du-s | sort -k 1n | while read l; do
+  arr=($l)
+  usage=${arr[0]}
+  dir=${arr[1]}
+  app=`echo /private/var/mobile/Applications/$dir/*.app`
+  echo -e "$usage\t$dir\t$app"
+done > /Applications/Utilities/apps.lst
+
+# 20120331
+# a better way to map app to dir:
+echo /private/var/mobile/Applications/*/*.app | sed 's:\.app :.app\n:g'
+
+# Now we have managed to install lighttpd+php5, brought up the http server,
+# along with the whole bunch of documentation: intel i386, php+python+perl,
+# gcc+gdb+stab, mit6.828, etc, finally managed to read html dox on iPad.
+
+# Perl is installed by following instructions at this page:
+# http://www.perkiset.org/forum/index.php?action=printpage;topic=2892.0
+# With the help of lighttpd+perl, we managed to automatically login to FT.com
+# using an account chosen arbitrarily from our free FT.com account pool.
+

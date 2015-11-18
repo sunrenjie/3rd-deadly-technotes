@@ -1,0 +1,221 @@
+<html>
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>Annotated br-tun flow tables</title>
+<style type="text/css">
+<!--
+pre { font-family: monospace; color: #000000; background-color: #ffffff; }
+body { font-family: monospace; color: #000000; background-color: #ffffff; }
+.lnr { color: #af5f00; }
+.PreProc { color: #c000c0; }
+.Type { color: #008000; }
+.Special { color: #c000c0; }
+.Constant { color: #c00000; }
+.Identifier { color: #008080; }
+.Statement { color: #af5f00; }
+.comment {
+  font-weight: bold;
+  font-size: 16px;
+  background: #00FF00;
+}
+.defect {
+  font-weight: bold;
+  font-size: 16px;
+  background: #FF00FF;
+}
+
+-->
+</style>
+</head>
+<body>
+<pre>
+Open vSwitch profiling taken from article at:
+http://assafmuller.com/2013/10/14/gre-tunnels-in-openstack-neutron/
+
+[root@NextGen1 ~]# ovs-ofctl dump-flows br-tun
+NXST_FLOW reply (xid=0x4):
+ cookie=0x0, duration=182369.287s, table=0, n_packets=5996, n_bytes=1481720, idle_age=52, hard_age=65534, priority=1,in_port=3 actions=resubmit(,2)
+ cookie=0x0, duration=182374.574s, table=0, n_packets=14172, n_bytes=3908726, idle_age=5, hard_age=65534, priority=1,in_port=1 actions=resubmit(,1)
+ cookie=0x0, duration=182370.094s, table=0, n_packets=0, n_bytes=0, idle_age=65534, hard_age=65534, priority=1,in_port=2 actions=resubmit(,2)
+ cookie=0x0, duration=182374.078s, table=0, n_packets=3, n_bytes=230, idle_age=65534, hard_age=65534, priority=0 actions=drop
+ cookie=0x0, duration=182373.435s, table=1, n_packets=3917, n_bytes=797884, idle_age=52, hard_age=65534, priority=0,dl_dst=00:00:00:00:00:00/01:00:00:00:00:00 actions=resubmit(,20)
+ cookie=0x0, duration=182372.888s, table=1, n_packets=10255, n_bytes=3110842, idle_age=5, hard_age=65534, priority=0,dl_dst=01:00:00:00:00:00/01:00:00:00:00:00 actions=resubmit(,21)
+ cookie=0x0, duration=182103.664s, table=2, n_packets=5982, n_bytes=1479916, idle_age=52, hard_age=65534, priority=1,tun_id=0x1388 actions=mod_vlan_vid:1,resubmit(,10)
+ cookie=0x0, duration=182372.476s, table=2, n_packets=14, n_bytes=1804, idle_age=65534, hard_age=65534, priority=0 actions=drop
+ cookie=0x0, duration=182372.099s, table=3, n_packets=0, n_bytes=0, idle_age=65534, hard_age=65534, priority=0 actions=drop
+ cookie=0x0, duration=182371.777s, table=10, n_packets=5982, n_bytes=1479916, idle_age=52, hard_age=65534, priority=1 actions=<a class="comment" title="It can be guessed from table 20 that in learn():
+1)	NXM_OF_VLAN_TCI[0..11]) will be translated into match of variable=value with variable being NXM_OF_VLAN_TCI and value being 0x0001/0x0fff
+2)	A form of x=y(or load:y->x) will be translated into x’=y’(or load:y’->x’) such that x’ will be x (still variable) and y’ will be the value of y evaluated when learn() is executed. For example, load:NXM_NX_TUN_ID[]->NXM_NX_TUN_ID[] will be translated to load:0x1388->NMX_NX_TUN_ID[].
+ ">learn</a>(table=20,hard_timeout=300,priority=1,NXM_OF_VLAN_TCI[0..11],NXM_OF_ETH_DST[]=NXM_OF_ETH_SRC[],load:0->NXM_OF_VLAN_TCI[],load:NXM_NX_TUN_ID[]->NXM_NX_TUN_ID[],output:NXM_OF_IN_PORT[]),output:1
+ cookie=0x0, duration=116255.067s, table=20, n_packets=3917, n_bytes=797884, hard_timeout=300, idle_age=52, hard_age=52, priority=1,vlan_tci=0x0001/0x0fff,dl_dst=fa:16:3e:1f:19:55 actions=load:0->NXM_OF_VLAN_TCI[],load:0x1388->NXM_NX_TUN_ID[],output:3
+ cookie=0x0, duration=182371.623s, table=20, n_packets=0, n_bytes=0, idle_age=65534, hard_age=65534, priority=0 actions=resubmit(,21)
+ cookie=0x0, duration=182103.777s, table=21, n_packets=10235, n_bytes=3109310, idle_age=5, hard_age=65534, priority=1,dl_vlan=1 actions=strip_vlan,set_tunnel:0x1388,output:3,output:2
+ cookie=0x0, duration=182371.507s, table=21, n_packets=20, n_bytes=1532, idle_age=65534, hard_age=65534, priority=0 actions=drop
+
+[r@control ~]$ sudo ovs-ofctl dump-flows br-tun
+NXST_FLOW reply (xid=0x4):
+ cookie=0x0, duration=13767.558s, table=0, n_packets=0, n_bytes=0, idle_age=13767, priority=0 actions=<a class="comment" title="the default lowest-priority drop">drop</a>
+ cookie=0x0, duration=5374.875s, table=0, n_packets=16, n_bytes=2568, idle_age=5218, priority=1,in_port=<a class="comment" title="packets from ports 7 and 8 are inbound vxlan tenant traffic; see output of ovs-ofctl show br-tun">8</a> actions=resubmit(,4)
+ cookie=0x0, duration=5381.220s, table=0, n_packets=16, n_bytes=2840, idle_age=5234, priority=1,in_port=7 actions=resubmit(,4)
+ cookie=0x0, duration=13762.387s, table=0, n_packets=30, n_bytes=2392, idle_age=13691, priority=1,in_port=<a class="comment" title="port 1 is from patch-int">1</a> actions=resubmit(,1)
+ cookie=0x0, duration=13761.710s, <a class="comment" title="flow table DVR_PROCESS; all packets from br-int go here">table=1</a>, n_packets=30, n_bytes=2392, idle_age=13691, priority=0 actions=resubmit(,2)
+ cookie=0x0, duration=13699.860s, table=1, n_packets=0, n_bytes=0, idle_age=13699, priority=1,dl_vlan=1,dl_src=<a class="comment" title="mac address for the router of the (one and only) tenant network created by devstack during installation">fa:16:3e:da:73:02</a> actions=mod_dl_src:<a class="comment" title="randomly generated dvr mac address for this host as in the table neutron.dvr_host_macs">fa:16:3f:f8:a5:9d</a>,<a class="comment" title="Make all packets from virtual routers as if they are from the host dvr port">resubmit(,2)</a>
+ cookie=0x0, duration=13700.205s, table=1, n_packets=0, n_bytes=0, idle_age=13700, priority=2,dl_vlan=1,<a class="comment" title="Packets from br-int to host dvr port ignored">dl_dst=fa:16:3e:da:73:02 actions=drop</a>
+ cookie=0x0, duration=13700.569s, table=1, n_packets=0, n_bytes=0, idle_age=13700, priority=3,arp,dl_vlan=1,<a class="comment" title="ARP request to the tenant network router ignored">arp_tpa=10.0.0.1</a> actions=drop
+ cookie=0x0, duration=13767.314s, <a class="comment" title="PATCH_LV_TO_TUN">table=2</a>, n_packets=0, n_bytes=0, idle_age=13767, priority=0,<a class="comment" title="outbound unicast traffic">dl_dst=00:00:00:00:00:00/01:00:00:00:00:00</a> actions=resubmit(,20)
+ cookie=0x0, duration=13767.016s, table=2, n_packets=30, n_bytes=2392, idle_age=13691, priority=0,<a class="comment" title="outbound flooded (broadcast, multicast, or unicast to unknown mac address) traffic">dl_dst=01:00:00:00:00:00/01:00:00:00:00:00</a> actions=resubmit(,22)
+ cookie=0x0, duration=13766.725s, <a class="comment" title="GRE_TUN_TO_LV: GRE not implemented in this setup">table=3</a>, n_packets=0, n_bytes=0, idle_age=13766, priority=0 actions=drop
+ cookie=0x0, duration=13766.433s, <a class="comment" title="VXLAN_TUN_TO_LV">table=4</a>, n_packets=0, n_bytes=0, idle_age=13766, priority=0 <a class="comment" title="tunnel ID (tenant network ID) unknown; ignore it">actions=drop</a>
+ cookie=0x0, duration=13702.154s, table=4, n_packets=125, n_bytes=20241, idle_age=5218, priority=1, <a class="comment" title="Tunnel traffic from known vxlan ID; if sender host is known, then just output to br-int without learning required">tun_id=0x3e9 actions=mod_vlan_vid:1,resubmit(,9)</a>
+ cookie=0x0, duration=13762.061s, table=9, n_packets=123, n_bytes=20045, idle_age=5218, priority=0 <a class="comment" title="tunnel ID unknown; learn unconditionally">actions=resubmit(,10)</a>
+ cookie=0x0, duration=13762.739s, table=9, n_packets=0, n_bytes=0, idle_age=13762, priority=1,dl_src=<a class="comment" title="dvr_host_macs for host compute1">fa:16:3f:a3:34:0d</a> actions=output:1
+ cookie=0x0, duration=13763.443s, table=9, n_packets=2, n_bytes=196, idle_age=6747, priority=1,dl_src=<a class="comment" title="dvr_host_macs for host compute2">fa:16:3f:40:1a:8c</a> actions=output:1
+ cookie=0x0, duration=13766.188s, <a class="comment" title="LEARN_FROM_TUN: try to learn other VM: MAC address, vlan_tci, tunnel ID, tunnel port so that later traffic to it can be unicast rather than multicast/broadcast">table=10</a>, n_packets=123, n_bytes=20045, idle_age=5218, priority=1 actions=<a class="comment" title="It can be guessed from table 20 that in learn():
+1)	NXM_OF_VLAN_TCI[0..11]) will be translated into match of variable=value with variable being NXM_OF_VLAN_TCI and value being 0x0001/0x0fff
+2)	A form of x=y(or load:y->x) will be translated into x’=y’(or load:y’->x’) such that x’ will be x (still variable) and y’ will be the value of y evaluated when learn() is executed. For example, load:NXM_NX_TUN_ID[]->NXM_NX_TUN_ID[] will be translated to load:0x1388->NMX_NX_TUN_ID[].
+ ">learn</a>(table=20,hard_timeout=300,priority=1,NXM_OF_VLAN_TCI[0..11],NXM_OF_ETH_DST[]=NXM_OF_ETH_SRC[],load:0->NXM_OF_VLAN_TCI[],load:NXM_NX_TUN_ID[]->NXM_NX_TUN_ID[],output:NXM_OF_IN_PORT[]),output:1
+ cookie=0x0, duration=13765.936s, table=20, n_packets=0, n_bytes=0, idle_age=13765, priority=0 actions=resubmit(,22)
+ cookie=0x0, duration=5372.448s, table=20, n_packets=0, n_bytes=0, idle_age=5372, priority=2,dl_vlan=1,dl_dst=fa:16:3e:e4:e1:ea actions=strip_vlan,set_tunnel:0x3e9,output:7
+ cookie=0x0, duration=5367.621s, table=20, n_packets=0, n_bytes=0, idle_age=5367, priority=2,dl_vlan=1,dl_dst=fa:16:3e:09:d1:ad actions=strip_vlan,set_tunnel:0x3e9,output:8
+ cookie=0x0, duration=13765.691s, table=22, n_packets=30, n_bytes=2392, idle_age=13691, priority=0 actions=drop
+ cookie=0x0, duration=5380.914s, table=22, n_packets=0, n_bytes=0, idle_age=5380, hard_age=5374, dl_vlan=1 actions=strip_vlan,set_tunnel:0x3e9,output:8,output:7
+
+
+[r@control ~]$ sudo ovs-vsctl show
+05717f06-24b8-40fd-b148-5e60bca34799
+    Bridge br-ex
+        Port "eth0"
+            Interface "eth0"
+        Port "qg-eae4dd7c-14"
+            Interface "qg-eae4dd7c-14"
+                type: internal
+        Port br-ex
+            Interface br-ex
+                type: internal
+    Bridge br-tun
+        Port br-tun
+            Interface br-tun
+                type: internal
+        Port patch-int
+            Interface patch-int
+                type: patch
+                options: {peer=patch-tun}
+        Port "vxlan-c0a80073"
+            Interface "vxlan-c0a80073"
+                type: vxlan
+                options: {df_default="true", in_key=flow, local_ip="192.168.0.225", out_key=flow, remote_ip="192.168.0.115"}
+        Port "vxlan-c0a80074"
+            Interface "vxlan-c0a80074"
+                type: vxlan
+                options: {df_default="true", in_key=flow, local_ip="192.168.0.225", out_key=flow, remote_ip="192.168.0.116"}
+    Bridge br-int
+        fail_mode: secure
+        Port patch-tun
+            Interface patch-tun
+                type: patch
+                options: {peer=patch-int}
+        Port "qr-e233d896-fa"
+            tag: 1
+            Interface "qr-e233d896-fa"
+                type: internal
+        Port "tapddaddf94-49"
+            tag: 4095
+            Interface "tapddaddf94-49"
+                type: internal
+        Port "sg-a80d6db1-69"
+            tag: 1
+            Interface "sg-a80d6db1-69"
+                type: internal
+        Port br-int
+            Interface br-int
+                type: internal
+    ovs_version: "2.3.0"
+
+
+[r@control ~]$ sudo ovs-ofctl show br-int
+OFPT_FEATURES_REPLY (xid=0x2): dpid:0000f2ed63e6ce4e
+n_tables:254, n_buffers:256
+capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
+actions: OUTPUT SET_VLAN_VID SET_VLAN_PCP STRIP_VLAN SET_DL_SRC SET_DL_DST SET_NW_SRC SET_NW_DST SET_NW_TOS SET_TP_SRC SET_TP_DST ENQUEUE
+ 1(patch-tun): addr:1e:a6:f8:4d:a1:5a
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+ 2(tapddaddf94-49): addr:00:00:00:00:00:00
+     config:     PORT_DOWN
+     state:      LINK_DOWN
+     speed: 0 Mbps now, 0 Mbps max
+ 3(qr-e233d896-fa): addr:00:00:00:00:00:00
+     config:     PORT_DOWN
+     state:      LINK_DOWN
+     speed: 0 Mbps now, 0 Mbps max
+ 4(sg-a80d6db1-69): addr:00:00:00:00:00:00
+     config:     PORT_DOWN
+     state:      LINK_DOWN
+     speed: 0 Mbps now, 0 Mbps max
+ LOCAL(br-int): addr:f2:ed:63:e6:ce:4e
+     config:     PORT_DOWN
+     state:      LINK_DOWN
+     speed: 0 Mbps now, 0 Mbps max
+OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0
+
+
+[r@control ~]$ sudo ovs-ofctl show br-tun
+OFPT_FEATURES_REPLY (xid=0x2): dpid:00000efca887c44b
+n_tables:254, n_buffers:256
+capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
+actions: OUTPUT SET_VLAN_VID SET_VLAN_PCP STRIP_VLAN SET_DL_SRC SET_DL_DST SET_NW_SRC SET_NW_DST SET_NW_TOS SET_TP_SRC SET_TP_DST ENQUEUE
+ 1(patch-int): addr:42:8e:a5:a3:d5:09
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+ 7(vxlan-c0a80073): addr:ae:0b:8a:19:b3:5d
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+ 8(vxlan-c0a80074): addr:76:40:ef:8d:67:c2
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+ LOCAL(br-tun): addr:0e:fc:a8:87:c4:4b
+     config:     PORT_DOWN
+     state:      LINK_DOWN
+     speed: 0 Mbps now, 0 Mbps max
+OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0
+
+[r@control ~]$ sudo ovs-ofctl show br-ex
+OFPT_FEATURES_REPLY (xid=0x2): dpid:00005254008299bf
+n_tables:254, n_buffers:256
+capabilities: FLOW_STATS TABLE_STATS PORT_STATS QUEUE_STATS ARP_MATCH_IP
+actions: OUTPUT SET_VLAN_VID SET_VLAN_PCP STRIP_VLAN SET_DL_SRC SET_DL_DST SET_NW_SRC SET_NW_DST SET_NW_TOS SET_TP_SRC SET_TP_DST ENQUEUE
+ 1(eth0): addr:02:25:f8:4f:85:56
+     config:     0
+     state:      0
+     current:    10GB-FD COPPER
+     speed: 10000 Mbps now, 0 Mbps max
+ 2(qg-eae4dd7c-14): addr:00:00:00:00:00:00
+     config:     PORT_DOWN
+     state:      LINK_DOWN
+     speed: 0 Mbps now, 0 Mbps max
+ LOCAL(br-ex): addr:52:54:00:82:99:bf
+     config:     0
+     state:      0
+     speed: 0 Mbps now, 0 Mbps max
+OFPT_GET_CONFIG_REPLY (xid=0x4): frags=normal miss_send_len=0
+<hr>
+APPENDIX. Definition for tunneling flow tables
+
+neutron/plugins/openvswitch/common/constants.py:41:# Various tables for tunneling flows
+neutron/plugins/openvswitch/common/constants.py:42:DVR_PROCESS = 1
+neutron/plugins/openvswitch/common/constants.py:43:PATCH_LV_TO_TUN = 2
+neutron/plugins/openvswitch/common/constants.py:44:GRE_TUN_TO_LV = 3
+neutron/plugins/openvswitch/common/constants.py:45:VXLAN_TUN_TO_LV = 4
+neutron/plugins/openvswitch/common/constants.py:46:DVR_NOT_LEARN = 9
+neutron/plugins/openvswitch/common/constants.py:47:LEARN_FROM_TUN = 10
+neutron/plugins/openvswitch/common/constants.py:48:UCAST_TO_TUN = 20
+neutron/plugins/openvswitch/common/constants.py:49:ARP_RESPONDER = 21
+neutron/plugins/openvswitch/common/constants.py:50:FLOOD_TO_TUN = 22
+</pre>
+</body>
+</html>
+
