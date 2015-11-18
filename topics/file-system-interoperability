@@ -23,7 +23,7 @@ Here are the detailed Does and Don'ts:
 File System    Windows    Linux    Mac OS X
 NTFS           RW         RO [1]   RO
 FAT*           RW         RO [1]   RO [1]
-ext2/3/4       RO [2]     RW       NA
+ext2/3/4       RO [2]     RW       NA [4]
 Apple HPFS     RO [3]     RO [1]   RW
 
 Notes: Reference OS'es are XP/7 for Windows, Fedora 20/21 x86_64 for Linux,
@@ -41,6 +41,12 @@ Also:
 [2] Read only support is available via third-party software ext2fsd.
 [3] Read only support is available via Apple bootcamp or third-party software
     HFSExplorer.
+[4] There is no official support. Nor is stable 3rd party support available.
+    There exists a commecial product Paragon ExtFS for Mac OS X. Initial
+    tests revealed that read support may be unstable: during installation
+    of Xcode 7.1.1, we could not place the DMG file in ext4 and install
+    directly from it, though we could copy the DMG file to local disk and
+    install from it without problem.
 
 * There are several FAT variants: FAT/FAT32/exFAT, etc. Now that they are
   under similar situations in our discussion, we don't bother to distinguish
