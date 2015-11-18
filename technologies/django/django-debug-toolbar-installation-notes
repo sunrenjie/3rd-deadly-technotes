@@ -1,0 +1,68 @@
+
+Installation notes for the django debug toolbar
+
+Summary
+
+The software combination that we brought to work:
+
+====          =======
+Name	        Version
+Debug Toolbar	1.4
+Django	      1.8.2
+Python	      3.4.1
+
+Steps:
+
+0. Install django dbug toolbar
+
+$ pip install django-debug-toolbar
+
+1. Change jquery URL (from django's point of view) from django-debug-toolbar's
+point of view (since the URL as shipped is blocked by GFW):
+
+Modify py3venv/lib/python3.4/site-packages/debug_toolbar/settings.py as:
+$ diff -urN settings.py.orig settings.py
+--- settings.py.orig	2015-11-17 17:07:07.759058733 +0800
++++ settings.py	2015-11-17 15:27:09.827593216 +0800
+@@ -18,7 +18,8 @@
+     # Toolbar options
+     'DISABLE_PANELS': set(['debug_toolbar.panels.redirects.RedirectsPanel']),
+     'INSERT_BEFORE': '</body>',
+-    'JQUERY_URL': '//ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js',
++    #'JQUERY_URL': '//ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js',
++    'JQUERY_URL': '/static/ajax/libs/jquery/2.1.4/jquery.min.js',
+     'RENDER_PANELS': None,
+     'RESULTS_CACHE_SIZE': 10,
+     'ROOT_TAG_EXTRA_ATTRS': '',
+
+2. Configure our project to enable django-debug-toolbar:
+
+# Add debug_toolbar to installed apps (in project's settings.py):
+INSTALLED_APPS = (
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'debug_toolbar',                   # <--- here
+    # ...
+)
+DEBUG = True  # Ensure DEBUG is on
+
+# Add static directories so that jquery for django-debug-toolbar can be placed
+# and referenced:
+STATICFILES_DIRS = (
+    os.path.join(BASE_DIR, "static"),
+    # '/var/www/html/.../', ... # add more paths if necessary
+)
+
+3. Download jquery.min.js for the version required (2.1.4 here; see step 1) and
+put it somewhere. Given the above configuration, we simple put it in
+<PROJECT BASE DIR>/static/ajax/libs/jquery/2.1.4/ .
+
+Ref:
+1. http://m.oschina.net/blog/380944
+2. http://django-debug-toolbar.readthedocs.org/en/1.4/
+3. https://docs.djangoproject.com/en/1.8/howto/static-files/
+
