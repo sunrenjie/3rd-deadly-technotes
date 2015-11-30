@@ -1,0 +1,7 @@
+Misc font notes on Linux
+
+1. When Google Chrome erronously displays Chinese fonts in 'STSong SC' no
+   matter how hard you try to stop it from doing so, the only thing to do will
+   be to replace STSong.ttc with STSong.ttf.
+   Ref: http://www.zhihu.com/question/20420500
+
