@@ -19,7 +19,7 @@ simply crashes.
 ============
 Installation
 
-Dependencies (AFAIN):
+Compilation dependencies (AFAIN):
 In apt-based distros (debian, ubuntu, etc), a simple command will do:
 'apt-get build-dep wine'.
 
@@ -48,6 +48,9 @@ openal-soft-devel openal-soft-devel.i686  gsm-devel.i686 samba-winbind
 libv4l-devel.i686 cups-devel.i686 libtiff-devel.i686 gstreamer-devel.i686
 gstreamer-plugins-base-devel.i686 gettext-devel.i686 libmpg123-devel.i686
 mesa-dri-drivers.i686 lcms2-devel.i686 glibc-devel glibc-devel.i686
+
+For pre-compiled binaries to run on Fedora 23, just install these libs:
+yum install alsa-plugins-pulseaudio.i686 freetype.i686
 
 Reference:
 [1] http://wiki.winehq.org/WineOn64bit#head-7cc10d01c630d1b7113e3f0bd093eb86f6192f2f
