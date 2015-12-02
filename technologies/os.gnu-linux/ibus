@@ -5,6 +5,10 @@ if [ ! "$XMODIFIERS" = "@im=ibus" ] ; then
   export XMODIFIERS="@im=ibus"
   export GTK_IM_MODULE=ibus
   export QT_IM_MODULE=ibus
-  ibus-daemon&
+  ibus-daemon -d
 fi
 
+Practically, the ibus-daemon command has to run when the GUI is up. That
+means at least they cannot be placed in ~/.bash_profile. On Gnome/Mate desktop,
+we could perfectly solve the problem by adding ibus-daemon to
+'Startup Applications'.
