@@ -1,0 +1,63 @@
+Install Fedora GNU/Linux of our own taste
+
+We keep installation and configuration info here to make further repeats
+easier (targeting Fedora 23).
+
+=====================
+YUM Software packages
+
+rpm fusion:
+rpm -i http://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-23.noarch.rpm
+rpm -i http://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-23.noarch.rpm
+
+# basic system groups
+yum groupinstall "Mate" base-x
+
+# system
+yum install mariadb-server libreoffice telnet p7zip p7zip-plugins wget lsb \
+  screen rdesktop mplayer gnome-mplayer ibus-pinyin NetworkManager-vpnc \
+  alsa-plugins-pulseaudio git freetype-freeworld
+
+# ia32 support (wine, vmware-view, etc)
+yum install gtk2.i686 gtk3.i686 libpng12.i686 alsa-lib.i686 gdk-pixbuf2.i686 \
+  libxkbfile.i686 glibc.i686 cairo.i686 freetype-freeworld \
+  gtk-murrine-engine.i686
+
+# for installing python packages
+yum install gcc redhat-rpm-config mariadb-devel libxml2 libxslt libxml2-devel \
+  libxslt-devel python3-devel python-devel python-virtualenv
+
+
+Special notes:
+1. MPlayer is from rpmfusion.
+2. alsa-plugins-pulseaudio is required for mplayer to play MP3 files normally.
+
+==============
+Other software
+
++ AMD graphic driver
++ Oracle JDK
++ Firefox (sync, flash plugin, java plugin)
++ Google Chrome
++ Wine (specific version required for certain app) and .wine dir
++ VMware View Client
++ Fonts
++ Other open source software that we'd prefer to download and install all by
+  ourselves (maven, scala, etc; mainly java based).
+  + Those in yum repos will certain have openjdk as dependency. We use our own
+    Oracle JDK and therefore has to maintain our own Java softwares.
++ Software available directly from git repos (notes, bypy, etc).
+
+==============
+Configurations
+
+vi /etc/selinux/config => disabled
+cp .bash_profile .bashrc .gitconfig .gitignore .vimrc .my.cnf .ssh/config \
+  .config/fontconfig/fonts.conf .m2/settings.xml .sbt/repositories \
+  .sbt/0.13/plugins/build.sbt .gradle/gradle.properties \
+  .gradle/init.d .gradle/init.d/artifactory.gradle
+  + Use this transfer technique to avoid the headache of directory hierarchies:
+    + cd /mnt1/home/r/  # old home dir
+    + tar -cf - xxx yyy | tar -xf - -C /home/r/ # to new home dir
+cp /etc/ssh/sshd_config # multiple port, UseDNS no, etc.
+
