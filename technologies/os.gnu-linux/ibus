@@ -12,3 +12,12 @@ Practically, the ibus-daemon command has to run when the GUI is up. That
 means at least they cannot be placed in ~/.bash_profile. On Gnome/Mate desktop,
 we could perfectly solve the problem by adding ibus-daemon to
 'Startup Applications'.
+
+One addition notice is that ibus-daemon has to run in a environment whose
+first python executable in PATH is NOT created by virtualenv; otherwise
+the "Preferences" window cannot be opened. It turns out that virtualenv python
+fails to add '/usr/lib64/python2.7/site-packages/gtk-2.0' to its path. The
+program behind the "Preferences" window is written in python that uses 'gi'
+package from the above path. It will not run with virtualenv'ed python. The
+conclusion therefore, use specialized prepared PATH when opening up ibus for
+configuration.

@@ -29,13 +29,16 @@ yum install gcc redhat-rpm-config mariadb-devel libxml2 libxslt libxml2-devel \
 
 
 Special notes:
-1. MPlayer is from rpmfusion.
+1. MPlayer and freetype-freeworld are from rpmfusion.
 2. alsa-plugins-pulseaudio is required for mplayer to play MP3 files normally.
 
 ==============
 Other software
 
 + AMD graphic driver
+  + The latest official driver as of this write supports kernel up to 3.19.
+    But Fedora 23 has 4.2.6. This means we will have to resort to the driver
+    bundled with Fedora (xorg-x11-drv-ati), which just works.
 + Oracle JDK
 + Firefox (sync, flash plugin, java plugin)
 + Google Chrome
@@ -55,9 +58,12 @@ vi /etc/selinux/config => disabled
 cp .bash_profile .bashrc .gitconfig .gitignore .vimrc .my.cnf .ssh/config \
   .config/fontconfig/fonts.conf .m2/settings.xml .sbt/repositories \
   .sbt/0.13/plugins/build.sbt .gradle/gradle.properties \
-  .gradle/init.d .gradle/init.d/artifactory.gradle
+  .gradle/init.d/artifactory.gradle .PyCharm50/config .IntelliJIdea15/config
   + Use this transfer technique to avoid the headache of directory hierarchies:
     + cd /mnt1/home/r/  # old home dir
     + tar -cf - xxx yyy | tar -xf - -C /home/r/ # to new home dir
 cp /etc/ssh/sshd_config # multiple port, UseDNS no, etc.
+
+# To boot into GUI login (remove destination if necessary)
+ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
 
