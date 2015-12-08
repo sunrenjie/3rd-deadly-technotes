@@ -1,7 +1,7 @@
 Install Fedora GNU/Linux of our own taste
 
 We keep installation and configuration info here to make further repeats
-easier (targeting Fedora 23).
+easier (targeting Fedora 23 by default unless otherwise mentioned explicitly).
 
 =====================
 YUM Software packages
@@ -40,16 +40,31 @@ Other software
     But Fedora 23 has 4.2.6. This means we will have to resort to the driver
     bundled with Fedora (xorg-x11-drv-ati), which just works.
 + Oracle JDK
-+ Firefox (sync, flash plugin, java plugin)
-+ Google Chrome
-+ Wine (specific version required for certain app) and .wine dir
-+ VMware View Client
++ Firefox
+  + Bookmark Sync'ing
+  + Plugins (@ ~/.mozilla/plugins):
+    + Flash: downloaded from Adobe site; cp libflashplayer.so =>
+    + Java: ln -s jdk/jre/lib/amd64/libnpjp2.so =>
+  + Add-ons (can be sync'ed together with bookmarks):
+    + 'EPUBReader'
+    + 'FoxyProxy Standard',
+    + 'Theme Font & Size Changer'
+    + 'User Agent Switcher'
++ Google Chrome (extensions in the official store cannot be downloaded for
+  offline use; has to be downloaded from sources elsewhere)
+  + Extensions:
+    + Ultimate User Agent Switcher, URL Sniffer
+    + youkuhtml5player (http://zythum.sinaapp.com/youkuhtml5playerbookmark/)
++ Wine (specific version required for certain app) and .wine dir [1]
++ VMware View Client [2]
 + Fonts
 + Other open source software that we'd prefer to download and install all by
   ourselves (maven, scala, etc; mainly java based).
   + Those in yum repos will certain have openjdk as dependency. We use our own
     Oracle JDK and therefore has to maintain our own Java softwares.
 + Software available directly from git repos (notes, bypy, etc).
+
+[1] See dedicated file on such topics.
 
 ==============
 Configurations
@@ -64,6 +79,6 @@ cp .bash_profile .bashrc .gitconfig .gitignore .vimrc .my.cnf .ssh/config \
     + tar -cf - xxx yyy | tar -xf - -C /home/r/ # to new home dir
 cp /etc/ssh/sshd_config # multiple port, UseDNS no, etc.
 
-# To boot into GUI login (remove destination if necessary)
+# To boot into GUI login (remove destination file if it already exists)
 ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
 
