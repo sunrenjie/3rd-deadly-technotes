@@ -1,11 +1,9 @@
-alias goa='python ~/bin/goagent-65b9542b98d2/local/proxy.py'
-
 # let ssh/scp be faster in sacrifice of minor security and features.
 ssh_options='-o StrictHostKeyChecking=no -o GSSAPIAuthentication=no'
 ssh_options+=' -o UserKnownHostsFile=/dev/null'
 alias ssh="env ssh $ssh_options"
 alias scp="env scp $ssh_options"
-ssh_options=
+unset ssh_options
 
 alias grep='grep --color' # both bsd and gnu grep accepts '--color'
 
@@ -36,4 +34,6 @@ fi
 alias virsh='sudo virsh'
 
 fi
+
+alias git_checkout_all='git status | awk '"'"'$1=="modified:"{print $2}'"'"' | xargs echo git checkout --'
 
