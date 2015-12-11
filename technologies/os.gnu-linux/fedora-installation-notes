@@ -27,9 +27,11 @@ yum install gtk2.i686 gtk3.i686 libpng12.i686 alsa-lib.i686 gdk-pixbuf2.i686 \
 yum install gcc redhat-rpm-config mariadb-devel libxml2 libxslt libxml2-devel \
   libxslt-devel python3-devel python-devel python-virtualenv
 
+# for exfat support
+yum install fuse-exfat exfat-utils
 
 Special notes:
-1. MPlayer and freetype-freeworld are from rpmfusion.
+1. MPlayer and freetype-freeworld, exfat support are from rpmfusion.
 2. alsa-plugins-pulseaudio is required for mplayer to play MP3 files normally.
 
 ==============
