@@ -1,0 +1,25 @@
+# The option '-U': When the proxy occasionally fails, we could repeat.
+mvn package -Dmaven.test.skip -U
+
+# The order of '-cp' part and class part is important!
+java -verbose -cp path/to/file.jar foo.bar.MainClass
+
+# maven command to gen javadoc
+mvn javadoc:javadoc
+
+# Borken maven cache sometimes leads to wierd Intellj Idea problems
+rm -rf ~/.m2/repositories
+
+# collect all dependencies jars, the sbt version
+# details:
+# 1) use debug to troubleshooting sbt problems
+# 2) see https://github.com/xerial/sbt-pack for the plugin sbt-pack
+sbt debug pack
+
+# run sbt scala program
+# details:
+# 0) collect all dependencies using sbt-pack
+# 1) note scala version
+# 2) wildcard in -classpath option does not work; doesn't know why
+/huge/r/bin/scala-2.11.7/bin/scala -classpath $(ls target/pack/lib/*.jar|xargs echo|sed 's/ /:/g'):target/scala-2.11/concurrency-examples_2.11-1.0.jar org.learningconcurrency.ch8.RemotingPongySystem
+
