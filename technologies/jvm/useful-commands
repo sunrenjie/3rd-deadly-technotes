@@ -23,3 +23,6 @@ sbt debug pack
 # 2) wildcard in -classpath option does not work; doesn't know why
 /huge/r/bin/scala-2.11.7/bin/scala -classpath $(ls target/pack/lib/*.jar|xargs echo|sed 's/ /:/g'):target/scala-2.11/concurrency-examples_2.11-1.0.jar org.learningconcurrency.ch8.RemotingPongySystem
 
+# to run clojure with rlwrap (to get enhanced command line prompt)
+alias clojure='rlwrap java -cp path/to/clojure-x.x.x.jar clojure.main'
+
