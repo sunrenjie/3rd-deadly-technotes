@@ -26,3 +26,23 @@ sbt debug pack
 # to run clojure with rlwrap (to get enhanced command line prompt)
 alias clojure='rlwrap java -cp path/to/clojure-x.x.x.jar clojure.main'
 
+================================================================================
+How to collect all dependent jars in one dir for maven project?
+
+Add the org.apache.maven.plugins in pom.xml:
+
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-dependency-plugin</artifactId>
+    <configuration>
+        <outputDirectory>
+            ${project.build.directory}
+        </outputDirectory>
+    </configuration>
+</plugin>
+
+Then run mvn clean dependency:copy-dependencies.
+
+Reference:
+http://stackoverflow.com/questions/567996/can-maven-collect-all-the-dependent-jars-for-a-project-to-help-with-application
+
