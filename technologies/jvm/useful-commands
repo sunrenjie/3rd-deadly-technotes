@@ -46,3 +46,7 @@ Then run mvn clean dependency:copy-dependencies.
 Reference:
 http://stackoverflow.com/questions/567996/can-maven-collect-all-the-dependent-jars-for-a-project-to-help-with-application
 
+================================================================================
+How to fetch all POMs for all dependent jars of the project:
+for p in $(ls *.jar | sed 's/\.jar$/.pom/'); do find /home/r/.m2/repository/ -name $p ; done | xargs grep pool
+
