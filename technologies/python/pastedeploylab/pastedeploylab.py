@@ -152,6 +152,12 @@ if __name__ == '__main__':
     Usages: access these URLs using curl or httpie:
         http://127.0.0.1:8080/
         http://127.0.0.1:8080/calc?operator=plus&operand1=12&operand2=23
+        http://127.0.0.1:8080/admin/users/
+        http://127.0.0.1:8080/admin/users/1
+
+    Note: our URL routing/mapping here is naive, if /admin (no terminal '/')
+    is requested, the server will throw exception
+    'RoutesException: URL or environ must be provided'.
     """
     print(usages)
     server.serve_forever()
