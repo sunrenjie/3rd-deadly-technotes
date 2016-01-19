@@ -40,7 +40,10 @@ Other software
 + AMD graphic driver
   + The latest official driver as of this write supports kernel up to 3.19.
     But Fedora 23 has 4.2.6. This means we will have to resort to the driver
-    bundled with Fedora (xorg-x11-drv-ati), which just works.
+    bundled with Fedora (xorg-x11-drv-ati), which just works. If there is
+    anything wrong, check the Xorg log. In one occation, some fallback driver
+    leads to display problem; uninstalled it and the problem disappeared.
+
 + Oracle JDK
 + Firefox
   + Bookmark Sync'ing
@@ -83,4 +86,12 @@ cp /etc/ssh/sshd_config # multiple port, UseDNS no, etc.
 
 # To boot into GUI login (remove destination file if it already exists)
 ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
+
+===============
+Additional Info
+
+1. When doing netinstall, the installation source has to be specified as
+   something like
+   http://mirrors.ustc.edu.cn/fedora/linux/releases/23/Everything/x86_64/os/
+   !!!
 
