@@ -1,0 +1,70 @@
+# head ifcfg-br*
+==> ifcfg-br0 <==
+DEVICE=br0
+TYPE=Bridge
+BOOTPROTO=static
+ONBOOT=yes
+DELAY=0
+IPADDR="192.168.1.225"
+NETMASK="255.255.255.128"
+NM_CONTROLLED=no
+
+==> ifcfg-br1 <==
+DEVICE=br1
+TYPE=Bridge
+BOOTPROTO=static
+ONBOOT=yes
+DELAY=0
+IPADDR="192.168.0.225"
+NETMASK="255.255.255.0"
+NM_CONTROLLED=no
+
+==> ifcfg-br-ex <==
+DEVICE=br-ex
+DEVICETYPE=ovs
+TYPE=OVSBridge
+OVSBOOTPROTO=static
+ONBOOT=yes
+OVS_EXTRA="set Bridge br-ex other-config:hwaddr=52:54:33:82:ce:bf"
+DELAY=0
+IPADDR="192.168.1.225"
+NETMASK="255.255.255.128"  # to try to avoid colliding with our external network 192.168.1.0/24
+NM_CONTROLLED=no
+
+################################################### system startup
+# The bridges are not brought up automatically at system boot; need to ifup
+# them manually.
+# ifup br0; ifup br1  # before devstack installation
+# ifup br1; ifup br-ex  # after devstack installation
+for s in mariadb httpd openvswitch rabbitmq-server; do service $s start; done
+# Disable irrelevant services to save memory
+# for s in docker kube kube-proxy; do service $s stop; done
+/usr/share/openvswitch/scripts/ovs-ctl start
+
+################################################## before devstack installation
+# Despite warnings, we've decided to use virtualenv to run devstack (and pay
+# the debts if necessary).
+# Way to work around the warning: no sourcing activate script, just put ~/bin/py2venv/bin in $PATH.
+
+# cleanup
+screen -d -r stack  # and then exit all
+for f in glance keystone neutron nova nova_api; do mysql -e "drop database $f"; done
+# execute the following as root:
+for f in logs data status; do rm -rf /opt/stack/$f; done
+for f in keystone glance neutron nova openstack ; do rm -rf /etc/$f; done
+# finally reboot to reset the network configurations (many neutron network
+# configurations are ad-hoc and not reentrantable).
+
+# export virtualenv executables globally in an ugly manner
+cd /usr/bin
+ls /home/r/bin/py2venv/bin/* | grep -v pyc$ | while read l; do echo ln -s $l; done | sh
+
+# Then prepare local.conf and run ./stack.sh
+
+################################################ post-installation configuration
+# create keypair
+# add security group rules
+# import image
+glance image-create --name "cirros-0.3.3-x86_64" --file cirros-0.3.3-x86_64-disk.img --disk-format qcow2 --container-format bare --progress
+
+
