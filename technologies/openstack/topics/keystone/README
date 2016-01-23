@@ -1,0 +1,2 @@
+The parts about wsgi, webob, PasteDeploy, Routes are best demonstrated by the
+minimalists' sample code in technologies/python/pastedeploylab/.

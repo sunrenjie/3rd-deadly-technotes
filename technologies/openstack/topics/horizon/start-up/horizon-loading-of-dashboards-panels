@@ -1,0 +1,293 @@
+@db89874 Merge "Improve field validation/error handling for flavor creation"
+
+Topics covered here:
+* lazy-loading of everything upon request by URL
+* auto-discovery and loading of sites, dashboards, panels, panel groups.
+* loading of panel/panel group configurations from files
+
+Ref:
+[1] http://www.cnblogs.com/littlebugfish/p/3983078.html
+
+openstack_dashboard/urls.py:30:import horizon
+openstack_dashboard/urls.py:31:
+openstack_dashboard/urls.py:32:urlpatterns = patterns(
+openstack_dashboard/urls.py:33:    '',
+openstack_dashboard/urls.py:34:    url(r'^$', 'openstack_dashboard.views.splash', name='splash'),
+openstack_dashboard/urls.py:35:    url(r'^api/', include('openstack_dashboard.api.rest.urls')),
+openstack_dashboard/urls.py:36:    url(r'', include(horizon.urls)),
+# NOTICE Here every other URL shall be handled in horizon.urls, or, horizon.Horizon._lazy_urls, and finally horizon.Site._urls()
+
+horizon/base.py:1001:class HorizonSite(Site):
+horizon/base.py:1002:    """A singleton implementation of Site such that all dealings with horizon
+horizon/base.py:1003:    get the same instance no matter what. There can be only one.
+horizon/base.py:1004:    """
+horizon/base.py:1005:    _instance = None
+horizon/base.py:1006:
+horizon/base.py:1007:    def __new__(cls, *args, **kwargs):
+horizon/base.py:1008:        if not cls._instance:
+horizon/base.py:1009:            cls._instance = super(Site, cls).__new__(cls, *args, **kwargs)
+horizon/base.py:1010:        return cls._instance
+horizon/base.py:1011:
+horizon/base.py:1012:
+horizon/base.py:1013:# The one true Horizon
+horizon/base.py:1014:Horizon = HorizonSite()
+
+horizon/__init__.py:22:# Because this module is compiled by setup.py before Django may be installed
+horizon/__init__.py:23:# in the environment we try importing Django and issue a warning but move on
+horizon/__init__.py:24:# should that fail.
+horizon/__init__.py:25:Horizon = None
+horizon/__init__.py:26:try:
+horizon/__init__.py:27:    from horizon.base import Dashboard  # noqa
+horizon/__init__.py:28:    from horizon.base import Horizon  # noqa
+horizon/__init__.py:29:    from horizon.base import Panel  # noqa
+horizon/__init__.py:30:    from horizon.base import PanelGroup  # noqa
+horizon/__init__.py:31:except ImportError:
+
+horizon/__init__.py:42:if Horizon:
+horizon/__init__.py:50:    urls = Horizon._lazy_urls
+
+# NOTICE Here
+horizon/base.py:155:class Registry(object):
+horizon/base.py:156:    def __init__(self):
+horizon/base.py:157:        self._registry = {}
+horizon/base.py:158:        if not getattr(self, '_registerable_class', None):
+horizon/base.py:159:            raise ImproperlyConfigured('Subclasses of Registry must set a '
+horizon/base.py:160:                                       '"_registerable_class" property.')
+horizon/base.py:161:
+horizon/base.py:162:    def _register(self, cls):
+# NOTICE registers dashboards to sites; Site.register(self, dashboard) simply redirects here
+horizon/base.py:163:        """Registers the given class.
+horizon/base.py:164:
+horizon/base.py:165:        If the specified class is already registered then it is ignored.
+horizon/base.py:166:        """
+horizon/base.py:167:        if not inspect.isclass(cls):
+horizon/base.py:168:            raise ValueError('Only classes may be registered.')
+horizon/base.py:169:        elif not issubclass(cls, self._registerable_class):
+horizon/base.py:170:            raise ValueError('Only %s classes or subclasses may be registered.'
+horizon/base.py:171:                             % self._registerable_class.__name__)
+horizon/base.py:172:
+horizon/base.py:173:        if cls not in self._registry:
+horizon/base.py:174:            cls._registered_with = self
+horizon/base.py:175:            self._registry[cls] = cls()
+horizon/base.py:176:
+horizon/base.py:177:        return self._registry[cls]
+
+horizon/base.py:362:class Dashboard(Registry, HorizonComponent):
+horizon/base.py:363:    """A base class for defining Horizon dashboards.
+horizon/base.py:446:    _registerable_class = Panel
+# NOTICE only Panels can be registered to Dashboards
+
+horizon/base.py:554:    def _autodiscover(self):
+# NOTICE auto-discovery for panels defined in class
+horizon/base.py:555:        """Discovers panels to register from the current dashboard module."""
+horizon/base.py:556:        if getattr(self, "_autodiscover_complete", False):
+horizon/base.py:557:            return
+horizon/base.py:558:
+horizon/base.py:559:        panels_to_discover = []
+horizon/base.py:560:        panel_groups = []
+horizon/base.py:561:        # If we have a flat iterable of panel names, wrap it again so
+horizon/base.py:562:        # we have a consistent structure for the next step.
+horizon/base.py:563:        if all([isinstance(i, six.string_types) for i in self.panels]):
+horizon/base.py:564:            self.panels = [self.panels]
+
+horizon/base.py:603:    @classmethod
+horizon/base.py:604:    def register(cls, panel):
+# NOTICE this is for registering panels defined in configuration files (openstack_dashboard.enabled)
+horizon/base.py:605:        """Registers a :class:`~horizon.Panel` with this dashboard."""
+horizon/base.py:606:        panel_class = Horizon.register_panel(cls, panel)
+horizon/base.py:607:        # Support template loading from panel template directories.
+horizon/base.py:608:        panel_mod = import_module(panel.__module__)
+horizon/base.py:609:        panel_dir = os.path.dirname(panel_mod.__file__)
+horizon/base.py:610:        template_dir = os.path.join(panel_dir, "templates")
+horizon/base.py:611:        if os.path.exists(template_dir):
+horizon/base.py:612:            key = os.path.join(cls.slug, panel.slug)
+horizon/base.py:613:            loaders.panel_template_dirs[key] = template_dir
+horizon/base.py:614:        return panel_class
+
+
+horizon/base.py:678:class Site(Registry, HorizonComponent):
+horizon/base.py:679:    """The overarching class which encompasses all dashboards and panels."""
+horizon/base.py:680:
+horizon/base.py:681:    # Required for registry
+horizon/base.py:682:    _registerable_class = Dashboard
+# NOTICE Only dashboards can be registered for a site.
+
+horizon/base.py:818:    def _lazy_urls(self):
+horizon/base.py:819:        """Lazy loading for URL patterns.
+horizon/base.py:820:
+horizon/base.py:821:        This method avoids problems associated with attempting to evaluate
+horizon/base.py:822:        the URLconf before the settings module has been loaded.
+horizon/base.py:823:        """
+horizon/base.py:824:        def url_patterns():
+# NOTICE URLConf redirects here:
+horizon/base.py:825:            return self._urls()[0]
+horizon/base.py:826:
+horizon/base.py:827:        return LazyURLPattern(url_patterns), self.namespace, self.slug
+horizon/base.py:828:
+
+# NOTICE And here, firstly of all, auto-discover all dashboards for this site (yes, all dashboards are auto-discovered),
+# then for each of them, auto-discover panels/panel groups (there are only a few). Finally, load panels/panel groups
+# from the configuration files.
+horizon/base.py:829:    def _urls(self):
+horizon/base.py:830:        """Constructs the URLconf for Horizon from registered Dashboards."""
+horizon/base.py:831:        urlpatterns = self._get_default_urlpatterns()
+horizon/base.py:832:        self._autodiscover()
+horizon/base.py:833:
+horizon/base.py:834:        # Discover each dashboard's panels.
+horizon/base.py:835:        for dash in self._registry.values():
+horizon/base.py:836:            dash._autodiscover()
+horizon/base.py:837:
+horizon/base.py:838:        # Load the plugin-based panel configuration
+horizon/base.py:839:        self._load_panel_customization()
+# _load_panel_customization() called in Site's _urls() after _autodiscover() calls.
+# NOTICE Why both autodiscover() and panel_customizations?
+# ANSWER They are used for different cases.
+# The Usages of _autodiscover():
+# 1. Upon loading the site (yes, we have only one site globally), based on what's available in settings.INSTALLED_APPS,
+     discover all dashboards and let them register with us (site => dashboards).
+# 2. Then for every dashboard registered in 1), discover all panels/panel groups defined in the dashboard class (dashboard => panels/panel groups):
+#    There is currently only one case according to profiling result:
+#    Within _autodiscover(Settings of class <class 'openstack_dashboard.dashboards.settings.dashboard.Settings'>): panels=('user', 'password')
+# To sum up, only dashboards and panels defined in classes available from settings.INSTALLED_APPS can be discovered and registered automatically.
+# Majority of other panels are instead loaded from configuration files.
+
+# NOTICE autodiscovey of dashboards for a site
+horizon/base.py:865:    def _autodiscover(self):
+horizon/base.py:866:        """Discovers modules to register from ``settings.INSTALLED_APPS``.
+horizon/base.py:867:
+horizon/base.py:868:        This makes sure that the appropriate modules get imported to register
+horizon/base.py:869:        themselves with Horizon.
+horizon/base.py:870:        """
+horizon/base.py:871:        if not getattr(self, '_registerable_class', None):
+horizon/base.py:872:            raise ImproperlyConfigured('You must set a '
+horizon/base.py:873:                                       '"_registerable_class" property '
+horizon/base.py:874:                                       'in order to use autodiscovery.')
+horizon/base.py:875:        # Discover both dashboards and panels, in that order
+horizon/base.py:876:        for mod_name in ('dashboard', 'panel'):
+horizon/base.py:877:            for app in settings.INSTALLED_APPS:
+horizon/base.py:878:                mod = import_module(app)
+horizon/base.py:879:                try:
+horizon/base.py:880:                    before_import_registry = copy.copy(self._registry)
+horizon/base.py:881:                    import_module('%s.%s' % (app, mod_name))
+horizon/base.py:882:                except Exception:
+horizon/base.py:883:                    self._registry = before_import_registry
+horizon/base.py:884:                    if module_has_submodule(mod, mod_name):
+# NOTICE here it will register it with ourself (<class 'horizon.base.HorizonSite'>)
+# for example, while importing app 'openstack_dashboard.dashboards.admin',
+# horizon.register(Admin) is called.
+horizon/base.py:885:                        raise
+horizon/base.py:886:
+horizon/base.py:887:    def _load_panel_customization(self):
+horizon/base.py:888:        """Applies the plugin-based panel configurations.
+horizon/base.py:889:
+horizon/base.py:890:        This method parses the panel customization from the ``HORIZON_CONFIG``
+horizon/base.py:891:        and make changes to the dashboard accordingly.
+horizon/base.py:892:
+horizon/base.py:893:        It supports adding, removing and setting default panels on the
+horizon/base.py:894:        dashboard. It also support registering a panel group.
+horizon/base.py:895:        """
+horizon/base.py:896:        panel_customization = self._conf.get("panel_customization", [])
+# NOTICE the configuration is loaded in openstack_dashboard/utils/settings.py:155, as demonstrated below.
+horizon/base.py:897:
+horizon/base.py:898:        # Process all the panel groups first so that they exist before panels
+horizon/base.py:899:        # are added to them and Dashboard._autodiscover() doesn't wipe out any
+horizon/base.py:900:        # panels previously added when its panel groups are instantiated.
+horizon/base.py:901:        panel_configs = []
+horizon/base.py:902:        for config in panel_customization:
+horizon/base.py:903:            if config.get('PANEL'):
+horizon/base.py:904:                panel_configs.append(config)
+horizon/base.py:905:            elif config.get('PANEL_GROUP'):
+horizon/base.py:906:                self._process_panel_group_configuration(config)
+horizon/base.py:907:            else:
+horizon/base.py:908:                LOG.warning("Skipping %s because it doesn't have PANEL or "
+horizon/base.py:909:                            "PANEL_GROUP defined.", config.__name__)
+horizon/base.py:910:        # Now process the panels.
+horizon/base.py:911:        for config in panel_configs:
+horizon/base.py:912:            self._process_panel_configuration(config)
+# NOTICE Majority of the panels are loaded here.
+horizon/base.py:913:
+horizon/base.py:914:    def _process_panel_configuration(self, config):
+horizon/base.py:915:        """Add, remove and set default panels on the dashboard."""
+horizon/base.py:916:        try:
+horizon/base.py:917:            dashboard = config.get('PANEL_DASHBOARD')
+horizon/base.py:918:            if not dashboard:
+horizon/base.py:919:                LOG.warning("Skipping %s because it doesn't have "
+horizon/base.py:920:                            "PANEL_DASHBOARD defined.", config.__name__)
+horizon/base.py:921:                return
+horizon/base.py:922:            panel_slug = config.get('PANEL')
+horizon/base.py:923:            dashboard_cls = self.get_dashboard(dashboard)
+horizon/base.py:924:            panel_group = config.get('PANEL_GROUP')
+horizon/base.py:925:            default_panel = config.get('DEFAULT_PANEL')
+horizon/base.py:926:
+horizon/base.py:927:            # Set the default panel
+horizon/base.py:928:            if default_panel:
+horizon/base.py:929:                dashboard_cls.default_panel = default_panel
+
+horizon/base.py:966:    def _process_panel_group_configuration(self, config):
+horizon/base.py:967:        """Adds a panel group to the dashboard."""
+horizon/base.py:968:        panel_group_slug = config.get('PANEL_GROUP')
+horizon/base.py:969:        try:
+horizon/base.py:970:            dashboard = config.get('PANEL_GROUP_DASHBOARD')
+horizon/base.py:971:            if not dashboard:
+horizon/base.py:972:                LOG.warning("Skipping %s because it doesn't have "
+horizon/base.py:973:                            "PANEL_GROUP_DASHBOARD defined.", config.__name__)
+horizon/base.py:974:                return
+horizon/base.py:975:            dashboard_cls = self.get_dashboard(dashboard)
+horizon/base.py:976:
+horizon/base.py:977:            panel_group_name = config.get('PANEL_GROUP_NAME')
+horizon/base.py:978:            if not panel_group_name:
+horizon/base.py:979:                LOG.warning("Skipping %s because it doesn't have "
+horizon/base.py:980:                            "PANEL_GROUP_NAME defined.", config.__name__)
+horizon/base.py:981:                return
+horizon/base.py:982:            # Create the panel group class
+horizon/base.py:983:            panel_group = type(panel_group_slug,
+horizon/base.py:984:                               (PanelGroup, ),
+horizon/base.py:985:                               {'slug': panel_group_slug,
+horizon/base.py:986:                                'name': panel_group_name,
+horizon/base.py:987:                                'panels': []},)
+# NOTICE Here creates a new PanelGroup class on the fly for the given panel group slug(shortname).
+# That's why the PanelGroup classes have wierd names like <class 'horizon.base.compute'>.
+see also https://docs.python.org/2/library/functions.html#type
+horizon/base.py:988:            # Add the panel group to dashboard
+horizon/base.py:989:            panels = list(dashboard_cls.panels)
+horizon/base.py:990:            panels.append(panel_group)
+horizon/base.py:991:            dashboard_cls.panels = tuple(panels)
+horizon/base.py:992:            # Trigger the autodiscovery to completely load the new panel group
+horizon/base.py:993:            dashboard_cls._autodiscover_complete = False
+horizon/base.py:994:            dashboard_cls._autodiscover()
+horizon/base.py:995:        except Exception as e:
+horizon/base.py:996:            LOG.warning('Could not process panel group %(panel_group)s: '
+horizon/base.py:997:                        '%(exc)s',
+horizon/base.py:998:                        {'panel_group': panel_group_slug, 'exc': e})
+
+
+################################################################################
+# TOPIC: loading panels/panel groups fom configuration files into horizon_config['panel_customization']
+# which will be read by _load_panel_customization().
+openstack_dashboard/settings.py:345:# Load the pluggable dashboard settings
+openstack_dashboard/settings.py:346:import openstack_dashboard.enabled
+openstack_dashboard/settings.py:347:import openstack_dashboard.local.enabled
+openstack_dashboard/settings.py:348:from openstack_dashboard.utils import settings
+openstack_dashboard/settings.py:349:
+openstack_dashboard/settings.py:350:INSTALLED_APPS = list(INSTALLED_APPS)  # Make sure it's mutable
+openstack_dashboard/settings.py:351:settings.update_dashboards(
+openstack_dashboard/settings.py:352:    [
+openstack_dashboard/settings.py:353:        openstack_dashboard.enabled,
+openstack_dashboard/settings.py:354:        openstack_dashboard.local.enabled,
+openstack_dashboard/settings.py:355:    ],
+openstack_dashboard/settings.py:356:    HORIZON_CONFIG,
+openstack_dashboard/settings.py:357:    INSTALLED_APPS,
+openstack_dashboard/settings.py:358:)
+# Configuration example:
+openstack_dashboard/enabled/_1010_compute_panel_group.py:1:from django.utils.translation import ugettext_lazy as _
+openstack_dashboard/enabled/_1010_compute_panel_group.py:2:
+openstack_dashboard/enabled/_1010_compute_panel_group.py:3:# The slug of the panel group to be added to HORIZON_CONFIG. Required.
+openstack_dashboard/enabled/_1010_compute_panel_group.py:4:PANEL_GROUP = 'compute'
+openstack_dashboard/enabled/_1010_compute_panel_group.py:5:# The display name of the PANEL_GROUP. Required.
+openstack_dashboard/enabled/_1010_compute_panel_group.py:6:PANEL_GROUP_NAME = _('Compute')
+openstack_dashboard/enabled/_1010_compute_panel_group.py:7:# The slug of the dashboard the PANEL_GROUP associated with. Required.
+openstack_dashboard/enabled/_1010_compute_panel_group.py:8:PANEL_GROUP_DASHBOARD = 'project'
+
+openstack_dashboard/utils/settings.py:155:    horizon_config['panel_customization'] = panel_customization
+openstack_dashboard/utils/settings.py:156:    horizon_config['dashboards'] = tuple(dashboards)
+

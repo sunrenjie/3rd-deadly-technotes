@@ -1,0 +1,2 @@
+client mainly uses keystonemiddleware.auth_token
+

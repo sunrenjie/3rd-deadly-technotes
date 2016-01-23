@@ -1,0 +1,16 @@
+mysql -e 'create database keystone'
+cp etc/keystone.conf.sample etc/keystone.conf
+# Then edit etc/keystone.conf:
+# connection = mysql://root:r@127.0.0.1/keystone
+keystone-manage --config-file etc/keystone.conf db_sync
+keystone-all --config-file etc/keystone.conf
+
+openstack --os-token ADMIN --os-url http://127.0.0.1:35357/v2.0/ project list
+
+curl -X GET -H "X-Auth-Token: ADMIN" http://127.0.0.1:35357/v2.0/tenants
+
+http 127.0.0.1:35357/v2.0/tenants X-Auth-Token:ADMIN
+
+insert the following code to break
+import pdb; pdb.set_trace()
+

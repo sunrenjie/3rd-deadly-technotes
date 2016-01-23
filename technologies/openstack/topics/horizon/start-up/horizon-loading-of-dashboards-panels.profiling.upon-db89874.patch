@@ -1,0 +1,100 @@
+diff --git a/horizon/base.py b/horizon/base.py
+index 04123af..b3bb8d3 100644
+--- a/horizon/base.py
++++ b/horizon/base.py
+@@ -342,6 +342,8 @@ class PanelGroup(object):
+         self.name = name or getattr(self, "name", None)
+         # Our panels must be mutable so it can be extended by others.
+         self.panels = list(panels or getattr(self, "panels", []))
++        print("PanelGroup init(): dashboard=%s, slug=%s, name=%s, panels=%s" %
++              (self.dashboard, self.slug, self.name, self.panels))
+ 
+     def __repr__(self):
+         return "<%s: %s>" % (self.__class__.__name__, self.slug)
+@@ -560,6 +562,7 @@ class Dashboard(Registry, HorizonComponent):
+         panel_groups = []
+         # If we have a flat iterable of panel names, wrap it again so
+         # we have a consistent structure for the next step.
++        print("Within _autodiscover(%s of class %s): panels=%s" % (self, self.__class__, self.panels))
+         if all([isinstance(i, six.string_types) for i in self.panels]):
+             self.panels = [self.panels]
+ 
+@@ -594,6 +597,8 @@ class Dashboard(Registry, HorizonComponent):
+             try:
+                 before_import_registry = copy.copy(self._registry)
+                 import_module('.%s.panel' % panel, package)
++                print("Within _autodiscover(%s of class %s): loaded panel %s @ %s" % (
++                    self, self.__class__, panel, package))
+             except Exception:
+                 self._registry = before_import_registry
+                 if module_has_submodule(mod, panel):
+@@ -603,6 +608,7 @@ class Dashboard(Registry, HorizonComponent):
+     @classmethod
+     def register(cls, panel):
+         """Registers a :class:`~horizon.Panel` with this dashboard."""
++        print("register: DashBoard(%s) <- Panel(%s)" % (cls, panel))
+         panel_class = Horizon.register_panel(cls, panel)
+         # Support template loading from panel template directories.
+         panel_mod = import_module(panel.__module__)
+@@ -703,6 +709,7 @@ class Site(Registry, HorizonComponent):
+ 
+     def register(self, dashboard):
+         """Registers a :class:`~horizon.Dashboard` with Horizon."""
++        print("register: Site(%s) <- DashBoard(%s)" % (self, dashboard))
+         return self._register(dashboard)
+ 
+     def unregister(self, dashboard):
+@@ -829,10 +836,12 @@ class Site(Registry, HorizonComponent):
+     def _urls(self):
+         """Constructs the URLconf for Horizon from registered Dashboards."""
+         urlpatterns = self._get_default_urlpatterns()
++        print("Calling self._autodiscover() (self=%s with cls=%s)" % (self, self.__class__))
+         self._autodiscover()
+ 
+         # Discover each dashboard's panels.
+         for dash in self._registry.values():
++            print("Calling dash._autodiscover() (dash=%s with cls=%s)" % (dash, dash.__class__))
+             dash._autodiscover()
+ 
+         # Load the plugin-based panel configuration
+@@ -858,6 +867,7 @@ class Site(Registry, HorizonComponent):
+             urlpatterns += patterns('',
+                                     url(r'^%s/' % dash.slug,
+                                         include(dash._decorated_urls)))
++        import pdb; pdb.set_trace()
+ 
+         # Return the three arguments to django.conf.urls.include
+         return urlpatterns, self.namespace, self.slug
+@@ -872,6 +882,7 @@ class Site(Registry, HorizonComponent):
+             raise ImproperlyConfigured('You must set a '
+                                        '"_registerable_class" property '
+                                        'in order to use autodiscovery.')
++        print("Within _autodiscover(%s of class %s)" % (self, self.__class__))
+         # Discover both dashboards and panels, in that order
+         for mod_name in ('dashboard', 'panel'):
+             for app in settings.INSTALLED_APPS:
+@@ -879,6 +890,8 @@ class Site(Registry, HorizonComponent):
+                 try:
+                     before_import_registry = copy.copy(self._registry)
+                     import_module('%s.%s' % (app, mod_name))
++                    print("Within _autodiscover(%s of class %s): finished import for %s.%s" % (
++                        self, self.__class__, app, mod_name))
+                 except Exception:
+                     self._registry = before_import_registry
+                     if module_has_submodule(mod, mod_name):
+@@ -912,6 +925,7 @@ class Site(Registry, HorizonComponent):
+             self._process_panel_configuration(config)
+ 
+     def _process_panel_configuration(self, config):
++        print("_process_panel_configuration(self=%s, config=%s)" % (self, config))
+         """Add, remove and set default panels on the dashboard."""
+         try:
+             dashboard = config.get('PANEL_DASHBOARD')
+@@ -964,6 +978,7 @@ class Site(Registry, HorizonComponent):
+                         {'panel': panel_slug, 'exc': e})
+ 
+     def _process_panel_group_configuration(self, config):
++        print("_process_panel_group_configuration(self=%s, config=%s)" % (self, config))
+         """Adds a panel group to the dashboard."""
+         panel_group_slug = config.get('PANEL_GROUP')
+         try:

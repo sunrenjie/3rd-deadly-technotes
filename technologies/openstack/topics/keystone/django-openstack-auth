@@ -1,0 +1,14 @@
+
+AUTHENTICATION_BACKENDS = ('openstack_auth.backend.KeystoneBackend',)
+AUTHENTICATION_URLS = ['openstack_auth.urls']
+AUTH_USER_MODEL = 'openstack_auth.User'
+一个认证后端是一个类，实现了2个方法：get_user(id) 和 authenticate(**credentials) 。
+
+dependencies:
+keystoneauth1 which do auth to keystone
+
+[References]
+
+http://www.cnblogs.com/lddhbu/archive/2012/06/26/2564072.html
+http://blog.csdn.net/happyteafriends/article/details/47341721
+http://docs.openstack.org/developer/django_openstack_auth/installation.html#installation
