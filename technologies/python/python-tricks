@@ -1,0 +1,52 @@
+python tricks
+
+########################################################
+### insert list to front of list
+x=[3,5,7,9]
+x[0:0] = [0,1]
+# now x is [0,1,3,5,7,9]
+
+########################################################
+### sort by attribute
+use attrgetter()
+ref: http://www.cnblogs.com/rongyilin/archive/2012/12/25/2833177.html
+
+########################################################
+### don't modify a dict while traversing it
+    attrs["_meta"] = opts = DataTableOptions(attrs.get("Meta", None))
+shall be changed to
+    dt_attrs = {}
+    dt_attrs["_meta"] = opts = DataTableOptions(attrs.get("Meta", None))
+
+########################################################
+### constructing new instance method on the fly:
+import new
+
+class Foo(object):
+  def handle(self, arg1, arg2, arg3):
+    print("args: %s, %s, %s" % (arg1, arg2, arg3))
+  def __init__(self):
+    def func(self, arg1, arg2, arg3):
+      return self.handle(arg1, arg2, arg3)
+    self.doit = new.instancemethod(func, self)
+
+x = Foo()
+x.doit("foo", "bar", "xyz")
+
+########################################################
+### The so-called single-instance pattern
+horizon/base.py:1001:class HorizonSite(Site):
+horizon/base.py:1002:    """A singleton implementation of Site such that all dealings with horizon
+horizon/base.py:1003:    get the same instance no matter what. There can be only one.
+horizon/base.py:1004:    """
+horizon/base.py:1005:    _instance = None
+horizon/base.py:1006:
+horizon/base.py:1007:    def __new__(cls, *args, **kwargs):
+horizon/base.py:1008:        if not cls._instance:
+horizon/base.py:1009:            cls._instance = super(Site, cls).__new__(cls, *args, **kwargs)
+horizon/base.py:1010:        return cls._instance
+horizon/base.py:1011:
+horizon/base.py:1012:
+horizon/base.py:1013:# The one true Horizon
+horizon/base.py:1014:Horizon = HorizonSite()
+
