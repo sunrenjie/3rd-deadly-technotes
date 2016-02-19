@@ -1,6 +1,6 @@
 # Please set environment variable OS_GIT_REVIEW_OUTDIR to the directory to
 # which the output file is to be written.
-function os_git_review {
+function git_review {
   if [ "$1" = "" ]; then
     echo "Usage: (at git working dir) os-git-review commit-hash"
   else
@@ -50,21 +50,31 @@ sub get_date {
   return sprintf("%04d%02d%02d", $year, $month, $day);
 }
 
+sub get_commit_hash {
+  my $l = $_[0];
+  chomp($l);
+  my @d = split(/\s+/, $l);
+  return $d[1];
+}
+
 my $c = 0;
 my $id;
 my $title;
 my $date;
 my @lines;
+my $commit;
 while (<STDIN>) {
   $c++;
   chomp;
   push @lines, $_;
+  $commit = get_commit_hash($_) if ($c == 1);
   $date = get_date($_) if ($c == 3);
   $title = get_title($_) if ($c == 5);
   if (/Change\-Id\: ([A-Za-z0-9]{9}).*/) {
     $id = $1;
   }
 }
+$id = substr($commit, 0, 6) unless defined $id;
 
 if (defined($title) && defined($id) && defined($date)) {
   my $f = "/tmp/${date}-${id}-${title}";
