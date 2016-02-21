@@ -1,0 +1,64 @@
+@41d0a816912f32ff0405882cca347682549a709d
+Use ByteBufAllocator to allocate ByteBuf for FullHttpMessage
+
+The commit message states the result as:
+"The ByteBuf assigned to the FullHttpMessage can now be configured as a
+pooled/unpooled, direct/heap based ByteBuf via the ByteBufAllocator used."
+This is certainly the case: care must be taken while encoding policies.
+
+class SpdyHttpDecoder:
+
+-    private static FullHttpRequest createHttpRequest(int spdyVersion, SpdyHeadersFrame requestFrame)
+-            throws Exception {
++    private static FullHttpRequest createHttpRequest(SpdyHeadersFrame requestFrame, ByteBufAllocator alloc)
++       throws Exception {
+# NOTICE
+0) Parameter spdyVersion is provided but actually not used.
+1) use ByteBuf created by alloc.buffer() as argument to
+DefaultFullHttpRequest() since ther latter does not create its own and requires
+a one as parameter.
+2) release the ByteBuf if the creation process does not finish successfully.
+Similar changes are made to createHttpResponse().
+# NOTICE end
+
+# NOTICE and here comes the usage changes:
+-                    FullHttpRequest httpRequestWithEntity = createHttpRequest(spdyVersion, spdySynStreamFrame);
++                    FullHttpRequest httpRequestWithEntity = createHttpRequest(spdySynStreamFrame, ctx.alloc());
+
+-                FullHttpResponse httpResponseWithEntity = createHttpResponse(ctx, spdySynReplyFrame, validateHeaders);
++                FullHttpResponse httpResponseWithEntity =
++                   createHttpResponse(spdySynReplyFrame, ctx.alloc(), validateHeaders);
+
+class HttpConversionUtil:
+-    public static FullHttpResponse toHttpResponse(int streamId, Http2Headers http2Headers, boolean validateHttpHeaders)
++    public static FullHttpResponse toHttpResponse(int streamId, Http2Headers http2Headers, ByteBufAllocator alloc,
++                                                  boolean validateHttpHeaders)
+                     throws Http2Exception {
+         HttpResponseStatus status = parseStatus(http2Headers.status());
+         // HTTP/2 does not define a way to carry the version or reason phrase that is included in an
+         // HTTP/1.1 status line.
+-        FullHttpResponse msg = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, validateHttpHeaders);
++        FullHttpResponse msg = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, status, alloc.buffer(),
++                                                           validateHttpHeaders);
+#NOTICE
+Here adds an alloc parameter. The constructor with alloc is already there for
+constructorDefaultFullHttpResponse, so no change is needed out there.
+Similar changes are made to toHttpRequest().
+#NOTICE end
+class InboundHttp2ToHttpAdapter:
+
+-    protected FullHttpMessage newMessage(Http2Stream stream, Http2Headers headers, boolean validateHttpHeaders)
++    protected FullHttpMessage newMessage(Http2Stream stream, Http2Headers headers, boolean validateHttpHeaders,
++                                         ByteBufAllocator alloc)
+             throws Http2Exception {
+-        return connection.isServer() ? HttpConversionUtil.toHttpRequest(stream.id(), headers,
+-                validateHttpHeaders) : HttpConversionUtil.toHttpResponse(stream.id(), headers, validateHttpHeaders);
++        return connection.isServer() ? HttpConversionUtil.toHttpRequest(stream.id(), headers, alloc,
++                validateHttpHeaders) : HttpConversionUtil.toHttpResponse(stream.id(), headers, alloc,
++                                                                         validateHttpHeaders);
+     }
+# NOTICE Here uses the functions changed in HttpConversionUtil.
+
+-            msg = newMessage(stream, headers, validateHttpHeaders);
++            msg = newMessage(stream, headers, validateHttpHeaders, ctx.alloc());
+
