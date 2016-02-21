@@ -1,0 +1,44 @@
+@23f7fc67a4aee858b6526885167c422a7339d593
+Enable shutdownOutput for EpollDomainSocketChannel
+
+github pages:
+https://github.com/netty/netty/pull/4883
+https://github.com/docker-java/docker-java/pull/472
+
+The motivation is that somehow the author (while working on docker-java, a
+project using netty) need to semi-close socket, yet the
+channel EpollDomainSocketChannel does not have shutdownOutput() method for that
+purpose while EpollSocketChannel does. The natural thing to do will be to
+generalize it and have it shared by them two channel classes. Indeed, such
+feature-completeness can be driven by realistic needs.
+
+The solution is that, the methods isInputShutdown(), isOutputShutdown(), and
+shutdownOutput() are collectively declared in the DuplexChannel interface. Their
+mpl. are moved from derived class EpollSocketChannel to base class
+EpollDomainSocketChannel (from which EpollDomainSocketChannel is derived).
+
+change summary:
+public abstract class AbstractEpollStreamChannel extends AbstractEpollChannel {
+=>
+public abstract class AbstractEpollStreamChannel extends AbstractEpollChannel implements DuplexChannel {
++ Pasted impl. for isInputShutdown(), isOutputShutdown(), shutdownOutput(), etc.
+
+public final class EpollSocketChannel extends AbstractEpollStreamChannel implements SocketChannel {
+=>
+public final class EpollSocketChannel extends AbstractEpollStreamChannel implements SocketChannel {
++ Cut impl. for isInputShutdown(), isOutputShutdown(), shutdownOutput(), etc.
+
+public interface DomainSocketChannel extends UnixChannel {
+=>
+public interface DomainSocketChannel extends UnixChannel, DuplexChannel {
+
+(new)
+public interface DuplexChannel extends Channel {
+
+public interface SocketChannel extends Channel {
+=>
+public interface SocketChannel extends DuplexChannel {
+
+Ref:
+public final class EpollDomainSocketChannel extends AbstractEpollStreamChannel implements DomainSocketChannel {
+
