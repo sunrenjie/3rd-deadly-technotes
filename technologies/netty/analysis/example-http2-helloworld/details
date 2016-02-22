@@ -1,0 +1,46 @@
+Http2ServerInitializer.configureClearText()
+
+io.netty.handler.codec.http.HttpServerCodec:
+public final class HttpServerCodec extends CombinedChannelDuplexHandler<HttpRequestDecoder, HttpResponseEncoder>
+        implements HttpServerUpgradeHandler.SourceCodec { ... }
+
+This codec is a encoder/decoder mix.
+The HttpServerUpgradeHandler.SourceCodec interface is for method removing
+itself and relevant handlers from the pipeline on protocol upgrade.
+
+[When ssl is enabled]
+[question: why protocol negotation and upgrading is different in cases when
+ssl is enabled or disabled? Answer: when ssl is enabled, 1) alpn is to be used,
+2) a choice of jdk vs. openssl is to be made ]
+A typical http 1 server pipeline will contain these handlers (excluding ssl handler):
++ HttpServerCodec
++ HttpObjectAggregator (when performing http2 upgrade, the protocol is still http
+1, the HttpServerUpgradeHandler handler for handling clear text upgrade extends
+HttpObjectAggregator).
++ HelloWorldHttp1Handler <- business logic here
+
+A typical http 2 server pipeline (excluding ssl handler) is built up by adding
+a single handler Http2OrHttpHandler (extending from ApplicationProtocolNegotiationHandler;
+which takes protocl upgrading result from ssl hander, then process it, configure
+pipeline, etc). After successful protocol upgrade, the pipeline
+will contain a single handler built by a
+builder class HelloWorldHttp2HandlerBuilder [1] (extending from
+AbstractHttp2ConnectionHandlerBuilder) from user-defined handler
+HelloWorldHttp2Handler (extending from Http2ConnectionHandler).
+
+[1] [More about building the handler] The base class AbstractHttp2ConnectionHandlerBuilder
+supports three building methods.
+Here HelloWorldHttp2HandlerBuilder extends 'minimally' - it merely constructs
+and provides a logger. Therefore, the handler is built by providing the handler in these steps:
++ build from a default connection:
+  connection = new DefaultHttp2Connection(isServer());
+  buildFromConnection(connection);
+  + Http2FrameReader reader = new DefaultHttp2FrameReader(validateHeaders);
+    Http2FrameWriter writer = new DefaultHttp2FrameWriter(headerSensitivityDetector());
+    Http2ConnectionEncoder encoder = new DefaultHttp2ConnectionEncoder(connection, writer);
+    Http2ConnectionDecoder decoder = new DefaultHttp2ConnectionDecoder(connection, encoder, reader);
+    buildFromCodec(decoder, encoder);
+    + build(decoder, encoder, initialSettings); // calling custom method in HelloWorldHttp2HandlerBuilder
+      + handler = new HelloWorldHttp2Handler(decoder, encoder, initialSettings);
+        + Http2ConnectionHandler(super class)()
+
