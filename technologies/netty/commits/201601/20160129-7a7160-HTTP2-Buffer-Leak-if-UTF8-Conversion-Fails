@@ -1,0 +1,67 @@
+@7a7160f176597e97f451748a05c54d6b1518524c
+HTTP/2 Buffer Leak if UTF8 Conversion Fails
+
+This commits in interesting because it is a good way of addressing the two
+concerns together:
+1) ByteBuf refCnt management
+   Always take resource management into account when exceptions may occur.
+2) exception handling 'patterns'
+   Use a flag to indicate exception. The flag is flipped at the end of
+   try-block.
+
+
+--- a/codec-http2/src/main/java/io/netty/handler/codec/http2/Http2CodecUtil.java
++++ b/codec-http2/src/main/java/io/netty/handler/codec/http2/Http2CodecUtil.java
+@@ -152,7 +152,15 @@ public final class Http2CodecUtil {
+
+         // Create the debug message. `* 3` because UTF-8 max character consumes 3 bytes.
+         ByteBuf debugData = ctx.alloc().buffer(cause.getMessage().length() * 3);
+-        ByteBufUtil.writeUtf8(debugData, cause.getMessage());
++        boolean shouldRelease = true;
++        try {
++            ByteBufUtil.writeUtf8(debugData, cause.getMessage());
++            shouldRelease = false;
++        } finally {
++            if (shouldRelease) {
++                debugData.release();
++            }
++        }
+         return debugData;
+     }
+# NOTICE The idea is to use a flag shouldRelease to indicate whether an
+exception has been thrown; in which case, the ByteBuf is finally release()'ed.
+But, the exception itself is not caught/handled. Only the site is cleaned up.
+The caller will be responsible for handling exceptions.
+# NOTICE end
+
+--- a/codec-http2/src/main/java/io/netty/handler/codec/http2/Http2ConnectionHandler.java
++++ b/codec-http2/src/main/java/io/netty/handler/codec/http2/Http2ConnectionHandler.java
+@@ -16,6 +16,7 @@ package io.netty.handler.codec.http2;
+
+ import io.netty.buffer.ByteBuf;
+ import io.netty.buffer.ByteBufUtil;
++import io.netty.buffer.Unpooled;
+ import io.netty.channel.ChannelFuture;
+ import io.netty.channel.ChannelFutureListener;
+ import io.netty.channel.ChannelHandlerContext;
+@@ -705,7 +706,13 @@ public class Http2ConnectionHandler extends ByteToMessageDecoder implements Http
+      */
+     private ChannelFuture goAway(ChannelHandlerContext ctx, Http2Exception cause) {
+         long errorCode = cause != null ? cause.error().code() : NO_ERROR.code();
+-        ByteBuf debugData = Http2CodecUtil.toByteBuf(ctx, cause);
++        ByteBuf debugData = Unpooled.EMPTY_BUFFER;
++        try {
++            debugData = Http2CodecUtil.toByteBuf(ctx, cause);
++        } catch (Throwable t) {
++            // We must continue on to prevent our internal state from becoming corrupted but we log this exception.
++            logger.warn("caught exception while translating " + cause + " to ByteBuf", t);
++        }
+         int lastKnownStream = connection().remote().lastStreamCreated();
+         return goAway(ctx, lastKnownStream, errorCode, debugData, ctx.newPromise());
+     }
+
+#NOTICE The idea is to use a default empty buffer as debugData and try to assign
+it. When exception occured in the process, the assignment does not happen, the
+error is logged.
+#NOTICE end
+
