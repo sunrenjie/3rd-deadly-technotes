@@ -1,0 +1,175 @@
+@691bc1690e9542d6093b91ffe1fbdf7d075bcd42
+ByteBufUtil.writeUtf8 not consistent with String.getBytes(Charset)
+
+This commits marks the completeness of UTF16=>UTF8 conversion in ByteBufUtil.
+Therefore, we place plenty of related info here.
+
+diff --git a/buffer/src/main/java/io/netty/buffer/ByteBufUtil.java b/buffer/src/main/java/io/netty/buffer/ByteBufUtil.java
+index 44fc52e..d5a51f4 100644
+--- a/buffer/src/main/java/io/netty/buffer/ByteBufUtil.java
++++ b/buffer/src/main/java/io/netty/buffer/ByteBufUtil.java
+@@ -57,6 +57,7 @@ public final class ByteBufUtil {
+         }
+     };
+
++    private static final byte WRITE_UTF_UNKNOWN = (byte) '?';
+     private static final int MAX_CHAR_BUFFER_SIZE;
+     private static final int THREAD_LOCAL_BUFFER_SIZE;
+
+@@ -400,8 +401,8 @@ public final class ByteBufUtil {
+                 buffer._setByte(writerIndex++, (byte) (0x80 | (c & 0x3f)));
+             } else if (isSurrogate(c)) {
+                 if (!Character.isHighSurrogate(c)) {
+-                    throw new IllegalArgumentException("Invalid encoding. " +
+-                            "Expected high (leading) surrogate at index " + i + " but got " + c);
++                    buffer._setByte(writerIndex++, WRITE_UTF_UNKNOWN);
++                    continue;
+                 }
+                 final char c2;
+                 try {
+@@ -410,12 +411,13 @@ public final class ByteBufUtil {
+                     // re-throw a more informative exception describing the problem.
+                     c2 = seq.charAt(++i);
+                 } catch (IndexOutOfBoundsException e) {
+-                    throw new IllegalArgumentException("Underflow. " +
+-                            "Expected low (trailing) surrogate at index " + i + " but no more characters found.", e);
++                    buffer._setByte(writerIndex++, WRITE_UTF_UNKNOWN);
++                    break;
+                 }
+                 if (!Character.isLowSurrogate(c2)) {
+-                    throw new IllegalArgumentException("Invalid encoding. " +
+-                            "Expected low (trailing) surrogate at index " + i + " but got " + c2);
++                    buffer._setByte(writerIndex++, WRITE_UTF_UNKNOWN);
++                    buffer._setByte(writerIndex++, Character.isHighSurrogate(c2) ? WRITE_UTF_UNKNOWN : c2);
++                    continue;
+                 }
+                 int codePoint = Character.toCodePoint(c, c2);
+                 // See http://www.unicode.org/versions/Unicode7.0.0/ch03.pdf#G2630.
+#NOTICE Here are the main changes.
+Essentially, the error handling logic is changed from throwing an exception to
+writing a special replacement char '?'. This is exact the behavior in impl.
+found in JDK.
+
+[Question: how is java's UTF16 => UTF8 performed ?]
+The main function is sun.nio.cs.UTF_8.Encoder.encode() @rt.jar [1], while
+surrogate pair parsing in sun.nio.cs.Surrogate.Parser.parse() (where the
+malformat-handling logic is defined). Netty's writeUtf8() is a simplified
+version combining ideas from the two.
+
+[1] The sun.nio.cs package is from rt.jar. The src.zip from Oracle JDK 8 does
+not contain source for it, while openjdk does. Therefore, we have to read the
+code from decompiled rt.jar for Oracle JDK. Interestingly, there are plenty of
+differences; likely openjdk code is written from scratch independently.
+#NOTICE end
+
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:356:    /**
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:357:     * Encode a {@link CharSequence} in <a href="http://en.wikipedia.org/wiki/UTF-8">UTF-8</a> and write
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:358:     * it to a {@link ByteBuf}.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:359:     *
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:360:     * This method returns the actual number of bytes written.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:361:     */
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:362:    public static int writeUtf8(ByteBuf buf, CharSequence seq) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:363:        if (buf == null) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:364:            throw new NullPointerException("buf");
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:365:        }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:366:        if (seq == null) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:367:            throw new NullPointerException("seq");
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:368:        }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:369:        // UTF-8 uses max. 3 bytes per char, so calculate the worst case.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:370:        final int len = seq.length();
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:371:        final int maxSize = len * 3;
+#NOTICE Question: why the 3 here?
+For each 16-bit code-unit char, we need at most 3 bytes to encode it in utf-8.
+This is the case in [U+800, U+D7FF] and [U+E000, U+FFFF] BMP areas.
+For code points >= U+10000, 2 code unit chars are required and 4 bytes are needed.
+That leads to 2 bytes per code-unit char.
+
+The name 'bytes-per-char' is a bit misleading. See the Java bug:
+http://bugs.java.com/view_bug.do?bug_id=6957230
+#NOTICE end
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:372:        buf.ensureWritable(maxSize);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:373:
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:374:        for (;;) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:375:            if (buf instanceof AbstractByteBuf) {
+#NOTICE Question: Why would we want to define a dedicated writeUtf8() here?
+0) This is an optimization (hence the term fast-path).
+1) The unoptimized writeBytes() perfoms plenty tasks (protections like ensureWritable()
+and validations) that are not needed here.
+2) The JDK's UTF16=>UTF8 conversion algorithm is difficult to use here with minimal
+effort.
+Also, note that AbstractByteBuf is base class for neally all ByteBuf implementations.
+See ./ByteBuf-class-hierarchy.png.
+#NOTICE end
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:376:                return writeUtf8((AbstractByteBuf) buf, seq, len);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:377:            } else if (buf instanceof WrappedByteBuf) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:378:                // Unwrap as the wrapped buffer may be an AbstractByteBuf and so we can use fast-path.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:379:                buf = buf.unwrap();
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:380:            } else {
+#NOTICE Here there may be some unknown ByteBuf types, just use the unoptimized writeBytes()
+along with the JDK's UTF16=>UTF8 conversion algorithm.
+#NOTICE end
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:381:                byte[] bytes = seq.toString().getBytes(CharsetUtil.UTF_8);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:382:                buf.writeBytes(bytes);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:383:                return bytes.length;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:384:            }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:385:        }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:386:    }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:387:
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:388:    // Fast-Path implementation
+#NOTICE The conversion itself shall be straightforward; it uses largely
+the same idea as the official implementation. Even the control flow is exactly
+the same.
+#NOTICE end
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:389:    private static int writeUtf8(AbstractByteBuf buffer, CharSequence seq, int len) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:390:        int oldWriterIndex = buffer.writerIndex;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:391:        int writerIndex = oldWriterIndex;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:392:
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:393:        // We can use the _set methods as these not need to do any index checks and reference checks.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:394:        // This is possible as we called ensureWritable(...) before.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:395:        for (int i = 0; i < len; i++) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:396:            char c = seq.charAt(i);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:397:            if (c < 0x80) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:398:                buffer._setByte(writerIndex++, (byte) c);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:399:            } else if (c < 0x800) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:400:                buffer._setByte(writerIndex++, (byte) (0xc0 | (c >> 6)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:401:                buffer._setByte(writerIndex++, (byte) (0x80 | (c & 0x3f)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:402:            } else if (isSurrogate(c)) {
+#NOTICE It is deliberate that exactly code points >= U+10000 need surrogate pair
+in UTF-16 and 4 bytes in UTF-8.
+#NOTICE end
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:403:                if (!Character.isHighSurrogate(c)) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:404:                    buffer._setByte(writerIndex++, WRITE_UTF_UNKNOWN);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:405:                    continue;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:406:                }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:407:                final char c2;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:408:                try {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:409:                    // Surrogate Pair consumes 2 characters. Optimistically try to get the next character to avoid
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:410:                    // duplicate bounds checking with charAt. If an IndexOutOfBoundsException is thrown we will
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:411:                    // re-throw a more informative exception describing the problem.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:412:                    c2 = seq.charAt(++i);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:413:                } catch (IndexOutOfBoundsException e) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:414:                    buffer._setByte(writerIndex++, WRITE_UTF_UNKNOWN);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:415:                    break;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:416:                }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:417:                if (!Character.isLowSurrogate(c2)) {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:418:                    buffer._setByte(writerIndex++, WRITE_UTF_UNKNOWN);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:419:                    buffer._setByte(writerIndex++, Character.isHighSurrogate(c2) ? WRITE_UTF_UNKNOWN : c2);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:420:                    continue;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:421:                }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:422:                int codePoint = Character.toCodePoint(c, c2);
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:423:                // See http://www.unicode.org/versions/Unicode7.0.0/ch03.pdf#G2630.
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:424:                buffer._setByte(writerIndex++, (byte) (0xf0 | (codePoint >> 18)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:425:                buffer._setByte(writerIndex++, (byte) (0x80 | ((codePoint >> 12) & 0x3f)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:426:                buffer._setByte(writerIndex++, (byte) (0x80 | ((codePoint >> 6) & 0x3f)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:427:                buffer._setByte(writerIndex++, (byte) (0x80 | (codePoint & 0x3f)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:428:            } else {
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:429:                buffer._setByte(writerIndex++, (byte) (0xe0 | (c >> 12)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:430:                buffer._setByte(writerIndex++, (byte) (0x80 | ((c >> 6) & 0x3f)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:431:                buffer._setByte(writerIndex++, (byte) (0x80 | (c & 0x3f)));
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:432:            }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:433:        }
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:434:        // update the writerIndex without any extra checks for performance reasons
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:435:        buffer.writerIndex = writerIndex;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:436:        return writerIndex - oldWriterIndex;
+buffer/src/main/java/io/netty/buffer/ByteBufUtil.java:437:    }
+
