@@ -1,0 +1,105 @@
+DefaultPromise as of commit @fc099292fda032289f656ebff7413d5a570a06a2
+
+All setXXX() and tryXXX() functions (XXX=Success, Failure) calls
+notifyListener() as thus:
+
+DefaultPromise.java:413:    @Override
+DefaultPromise.java:414:    public Promise<V> setFailure(Throwable cause) {
+DefaultPromise.java:415:        if (setFailure0(cause)) {
+DefaultPromise.java:416:            notifyListeners();
+DefaultPromise.java:417:            return this;
+DefaultPromise.java:418:        }
+DefaultPromise.java:419:        throw new IllegalStateException("complete already: " + this, cause);
+DefaultPromise.java:420:    }
+DefaultPromise.java:421:
+DefaultPromise.java:422:    @Override
+DefaultPromise.java:423:    public boolean tryFailure(Throwable cause) {
+DefaultPromise.java:424:        if (setFailure0(cause)) {
+DefaultPromise.java:425:            notifyListeners();
+DefaultPromise.java:426:            return true;
+DefaultPromise.java:427:        }
+DefaultPromise.java:428:        return false;
+DefaultPromise.java:429:    }
+
+DefaultPromise.java:544:    private void notifyListeners() {
+DefaultPromise.java:545:        // This method doesn't need synchronization because:
+DefaultPromise.java:546:        // 1) This method is always called after synchronized (this) block.
+DefaultPromise.java:547:        //    Hence any listener list modification happens-before this method.
+DefaultPromise.java:548:        // 2) This method is called only when 'done' is true.  Once 'done'
+DefaultPromise.java:549:        //    becomes true, the listener list is never modified - see add/removeListener()
+For the 1st occasion:
+It is the caller's responsibility to embody tryXXX() and setXXX() function
+calls in synchronized blocks (see class PromiseAggregator). Or, if all relevant
+code is sure to execute on the promise event loop thread, then the caller code
+does not need synchronization, either.
+For the 2nd occasion:
+1) functions like setFailure0() will assign to this.result ('done' is true if
+result != null && result != UNCANCELLABLE).
+2) add/removeListener() will not touch the listeners if 'done' is true.
+DefaultPromise.java:550:
+DefaultPromise.java:551:        Object listeners = this.listeners;
+DefaultPromise.java:552:        if (listeners == null) {
+DefaultPromise.java:553:            return;
+DefaultPromise.java:554:        }
+DefaultPromise.java:555:
+There are two types possible for this.listeners: GenericFutureListener<? extends Future<V>>
+and DefaultFutureListeners (an iterable list of former type). Either way, finally
+notifyListener0() will be called and then listener.operationComplete(future)
+will be called.
+The logic here is that if currently we are executing in the event loop thread of
+the promise and that the listener stack does not grows too large, we will execute the
+notifyListener0() function directly. Otherwise, we will submit the function
+call(s) as jobs to the promise's executor thread.
+DefaultPromise.java:556:        EventExecutor executor = executor();
+DefaultPromise.java:557:        if (executor.inEventLoop()) {
+DefaultPromise.java:558:            final InternalThreadLocalMap threadLocals = InternalThreadLocalMap.get();
+DefaultPromise.java:559:            final int stackDepth = threadLocals.futureListenerStackDepth();
+DefaultPromise.java:560:            if (stackDepth < MAX_LISTENER_STACK_DEPTH) {
+This is to avoid overflow, as can be revealed in git commit history.
+DefaultPromise.java:561:                threadLocals.setFutureListenerStackDepth(stackDepth + 1);
+DefaultPromise.java:562:                try {
+DefaultPromise.java:563:                    if (listeners instanceof DefaultFutureListeners) {
+DefaultPromise.java:564:                        notifyListeners0(this, (DefaultFutureListeners) listeners);
+DefaultPromise.java:565:                    } else {
+DefaultPromise.java:566:                        final GenericFutureListener<? extends Future<V>> l =
+DefaultPromise.java:567:                                (GenericFutureListener<? extends Future<V>>) listeners;
+DefaultPromise.java:568:                        notifyListener0(this, l);
+DefaultPromise.java:569:                    }
+DefaultPromise.java:570:                } finally {
+DefaultPromise.java:571:                    this.listeners = null;
+DefaultPromise.java:572:                    threadLocals.setFutureListenerStackDepth(stackDepth);
+DefaultPromise.java:573:                }
+DefaultPromise.java:574:                return;
+DefaultPromise.java:575:            }
+DefaultPromise.java:576:        }
+DefaultPromise.java:577:
+DefaultPromise.java:578:        if (listeners instanceof DefaultFutureListeners) {
+DefaultPromise.java:579:            final DefaultFutureListeners dfl = (DefaultFutureListeners) listeners;
+DefaultPromise.java:580:            execute(executor, new OneTimeTask() {
+DefaultPromise.java:581:                @Override
+DefaultPromise.java:582:                public void run() {
+DefaultPromise.java:583:                    notifyListeners0(DefaultPromise.this, dfl);
+DefaultPromise.java:584:                    DefaultPromise.this.listeners = null;
+DefaultPromise.java:585:                }
+DefaultPromise.java:586:            });
+DefaultPromise.java:587:        } else {
+DefaultPromise.java:588:            final GenericFutureListener<? extends Future<V>> l =
+DefaultPromise.java:589:                    (GenericFutureListener<? extends Future<V>>) listeners;
+DefaultPromise.java:590:            execute(executor, new OneTimeTask() {
+DefaultPromise.java:591:                @Override
+DefaultPromise.java:592:                public void run() {
+DefaultPromise.java:593:                    notifyListener0(DefaultPromise.this, l);
+DefaultPromise.java:594:                    DefaultPromise.this.listeners = null;
+DefaultPromise.java:595:                }
+DefaultPromise.java:596:            });
+DefaultPromise.java:597:        }
+DefaultPromise.java:598:    }
+DefaultPromise.java:599:
+DefaultPromise.java:600:    private static void notifyListeners0(Future<?> future, DefaultFutureListeners listeners) {
+DefaultPromise.java:601:        final GenericFutureListener<?>[] a = listeners.listeners();
+DefaultPromise.java:602:        final int size = listeners.size();
+DefaultPromise.java:603:        for (int i = 0; i < size; i ++) {
+DefaultPromise.java:604:            notifyListener0(future, a[i]);
+DefaultPromise.java:605:        }
+DefaultPromise.java:606:    }
+

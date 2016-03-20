@@ -1,0 +1,180 @@
+PromiseAggregatorTest, as of @fc099292fda032289f656ebff7413d5a570a06a2
+
+One benefit revealed while I was analyzing the code is that it helped me figure
+out some code logic.
+
+The way this test class is written differs tremendously from that of
+PromiseCombinerTest. It uses easymock, hamcrest, and other junit features.
+
+PromiseAggregatorTest.java:1:/*
+PromiseAggregatorTest.java:2: * Copyright 2014 The Netty Project
+PromiseAggregatorTest.java:3: *
+PromiseAggregatorTest.java:4: * The Netty Project licenses this file to you under the Apache License,
+PromiseAggregatorTest.java:5: * version 2.0 (the "License"); you may not use this file except in compliance
+PromiseAggregatorTest.java:6: * with the License. You may obtain a copy of the License at:
+PromiseAggregatorTest.java:7: *
+PromiseAggregatorTest.java:8: *   http://www.apache.org/licenses/LICENSE-2.0
+PromiseAggregatorTest.java:9: *
+PromiseAggregatorTest.java:10: * Unless required by applicable law or agreed to in writing, software
+PromiseAggregatorTest.java:11: * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+PromiseAggregatorTest.java:12: * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+PromiseAggregatorTest.java:13: * License for the specific language governing permissions and limitations
+PromiseAggregatorTest.java:14: * under the License.
+PromiseAggregatorTest.java:15: */
+PromiseAggregatorTest.java:16:
+PromiseAggregatorTest.java:17:package io.netty.util.concurrent;
+PromiseAggregatorTest.java:18:
+PromiseAggregatorTest.java:19:import static org.easymock.EasyMock.*;
+PromiseAggregatorTest.java:20:import static org.hamcrest.CoreMatchers.*;
+PromiseAggregatorTest.java:21:import static org.junit.Assert.*;
+PromiseAggregatorTest.java:22:
+PromiseAggregatorTest.java:23:import org.junit.Rule;
+PromiseAggregatorTest.java:24:import org.junit.Test;
+PromiseAggregatorTest.java:25:import org.junit.rules.ExpectedException;
+PromiseAggregatorTest.java:26:
+PromiseAggregatorTest.java:27:public class PromiseAggregatorTest {
+PromiseAggregatorTest.java:28:
+PromiseAggregatorTest.java:29:    @Rule
+PromiseAggregatorTest.java:30:    public ExpectedException expectedException = ExpectedException.none();
+#NOTICE This is such that we could use expectedException.expect in @Test functions.
+PromiseAggregatorTest.java:31:
+PromiseAggregatorTest.java:32:    @Test
+PromiseAggregatorTest.java:33:    public void testNullAggregatePromise() {
+PromiseAggregatorTest.java:34:        expectedException.expect(NullPointerException.class);
+PromiseAggregatorTest.java:35:        new PromiseAggregator<Void, Future<Void>>(null);
+PromiseAggregatorTest.java:36:    }
+PromiseAggregatorTest.java:37:
+PromiseAggregatorTest.java:38:    @Test
+PromiseAggregatorTest.java:39:    public void testAddNullFuture() {
+PromiseAggregatorTest.java:40:        @SuppressWarnings("unchecked")
+PromiseAggregatorTest.java:41:        Promise<Void> p = createStrictMock(Promise.class);
+#NOTICE Maybe just create the mock object by interface.
+PromiseAggregatorTest.java:42:        PromiseAggregator<Void, Future<Void>> a =
+PromiseAggregatorTest.java:43:                new PromiseAggregator<Void, Future<Void>>(p);
+PromiseAggregatorTest.java:44:        expectedException.expect(NullPointerException.class);
+PromiseAggregatorTest.java:45:        a.add((Promise<Void>[]) null);
+PromiseAggregatorTest.java:46:    }
+PromiseAggregatorTest.java:47:
+PromiseAggregatorTest.java:48:    @SuppressWarnings("unchecked")
+PromiseAggregatorTest.java:49:    @Test
+PromiseAggregatorTest.java:50:    public void testSucessfulNoPending() throws Exception {
+#NOTICES
+The general workflow for a @Test function general looks like this (as exemplified
+by this @Test function):
+1) the object for the class being tested is created (L52-53)
+2) mock objects for classes interacting with the class are created (upon creation,
+they are in record state) (L51, L55)
+3) add EXACTLY the expect-andXXX behavior definitions that shall happen (any
+happened-yet-not-defined and defined-yet-not-happened behaviors will fail the
+test) (L56)
+4) call replay() to change the mocks from record state to replay mode (L57); the
+mocks in argument can be of arbitrary order
+5) invoke the functions on the object being tested such that the desired behaviors
+are exposed (L59-60)
+6) call verify() to check behavior of the mock objects according to the definitions
+(L61); the mocks in argument can be of arbitrary order
+#NOTICES end
+PromiseAggregatorTest.java:51:        Promise<Void> p = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:52:        PromiseAggregator<Void, Future<Void>> a =
+PromiseAggregatorTest.java:53:                new PromiseAggregator<Void, Future<Void>>(p);
+PromiseAggregatorTest.java:54:
+PromiseAggregatorTest.java:55:        Future<Void> future = createStrictMock(Future.class);
+PromiseAggregatorTest.java:56:        expect(p.setSuccess(null)).andReturn(p);
+#NOTICES
+This behavior-definition statement can be interpreted as:
+1) will expect p.setSuccess() is called with null
+2) will return p if that function call happens (In a.operationComplete(future),
+this return value is discarded; therefore, returning any value including null
+is just fine. But we nevertheless have to keep it to have a complete
+behavior definition.)
+#NOTICES end
+PromiseAggregatorTest.java:57:        replay(future, p);
+PromiseAggregatorTest.java:58:
+PromiseAggregatorTest.java:59:        a.add();
+#NOTICE Effectively does nothing; yet this is THE behavior tested here.
+PromiseAggregatorTest.java:60:        a.operationComplete(future);
+#NOTICES
+Will effectively just finish the aggregator without checking the status of future,
+since pendingPromises is null (no promise is added yet).
+#NOTICES end
+PromiseAggregatorTest.java:61:        verify(future, p);
+#NOTICE The verify() will finally trigger checkings of the expectations on the mocks defined earlier.
+PromiseAggregatorTest.java:62:    }
+PromiseAggregatorTest.java:63:
+PromiseAggregatorTest.java:64:    @SuppressWarnings("unchecked")
+PromiseAggregatorTest.java:65:    @Test
+PromiseAggregatorTest.java:66:    public void testSuccessfulPending() throws Exception {
+PromiseAggregatorTest.java:67:        Promise<Void> p = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:68:        PromiseAggregator<Void, Future<Void>> a =
+PromiseAggregatorTest.java:69:                new PromiseAggregator<Void, Future<Void>>(p);
+PromiseAggregatorTest.java:70:        Promise<Void> p1 = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:71:        Promise<Void> p2 = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:72:
+PromiseAggregatorTest.java:73:        expect(p1.addListener(a)).andReturn(p1);
+PromiseAggregatorTest.java:74:        expect(p2.addListener(a)).andReturn(p2);
+PromiseAggregatorTest.java:75:        expect(p1.isSuccess()).andReturn(true);
+PromiseAggregatorTest.java:76:        expect(p2.isSuccess()).andReturn(true);
+PromiseAggregatorTest.java:77:        expect(p.setSuccess(null)).andReturn(p);
+PromiseAggregatorTest.java:78:        replay(p1, p2, p);
+PromiseAggregatorTest.java:79:
+PromiseAggregatorTest.java:80:        assertThat(a.add(p1, null, p2), is(a));
+#NOTICE This essential means that a.add() shall return itself (this).
+PromiseAggregatorTest.java:81:        a.operationComplete(p1);
+PromiseAggregatorTest.java:82:        a.operationComplete(p2);
+PromiseAggregatorTest.java:83:
+PromiseAggregatorTest.java:84:        verify(p1, p2, p);
+PromiseAggregatorTest.java:85:    }
+PromiseAggregatorTest.java:86:
+PromiseAggregatorTest.java:87:    @SuppressWarnings("unchecked")
+PromiseAggregatorTest.java:88:    @Test
+PromiseAggregatorTest.java:89:    public void testFailedFutureFailPending() throws Exception {
+PromiseAggregatorTest.java:90:        Promise<Void> p = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:91:        PromiseAggregator<Void, Future<Void>> a =
+PromiseAggregatorTest.java:92:                new PromiseAggregator<Void, Future<Void>>(p);
+PromiseAggregatorTest.java:93:        Promise<Void> p1 = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:94:        Promise<Void> p2 = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:95:        Throwable t = createStrictMock(Throwable.class);
+PromiseAggregatorTest.java:96:
+PromiseAggregatorTest.java:97:        expect(p1.addListener(a)).andReturn(p1);
+PromiseAggregatorTest.java:98:        expect(p2.addListener(a)).andReturn(p2);
+PromiseAggregatorTest.java:99:        expect(p1.isSuccess()).andReturn(false);
+PromiseAggregatorTest.java:100:        expect(p1.cause()).andReturn(t);
+PromiseAggregatorTest.java:101:        expect(p.setFailure(t)).andReturn(p);
+PromiseAggregatorTest.java:102:        expect(p2.setFailure(t)).andReturn(p2);
+PromiseAggregatorTest.java:103:        replay(p1, p2, p);
+PromiseAggregatorTest.java:104:
+PromiseAggregatorTest.java:105:        a.add(p1, p2);
+PromiseAggregatorTest.java:106:        a.operationComplete(p1);
+#NOTICES
+Here, failPending is true (the default value). When any of the added promises
+fail, all the pending promises in the pending list will be setFailure()'ed.
+Hence we expect p2.setFailure(t) is called.
+#NOTICES end
+PromiseAggregatorTest.java:107:        verify(p1, p2, p);
+PromiseAggregatorTest.java:108:    }
+PromiseAggregatorTest.java:109:
+PromiseAggregatorTest.java:110:    @SuppressWarnings("unchecked")
+PromiseAggregatorTest.java:111:    @Test
+PromiseAggregatorTest.java:112:    public void testFailedFutureNoFailPending() throws Exception {
+PromiseAggregatorTest.java:113:        Promise<Void> p = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:114:        PromiseAggregator<Void, Future<Void>> a =
+PromiseAggregatorTest.java:115:                new PromiseAggregator<Void, Future<Void>>(p, false);
+PromiseAggregatorTest.java:116:        Promise<Void> p1 = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:117:        Promise<Void> p2 = createStrictMock(Promise.class);
+PromiseAggregatorTest.java:118:        Throwable t = createStrictMock(Throwable.class);
+PromiseAggregatorTest.java:119:
+PromiseAggregatorTest.java:120:        expect(p1.addListener(a)).andReturn(p1);
+PromiseAggregatorTest.java:121:        expect(p2.addListener(a)).andReturn(p2);
+PromiseAggregatorTest.java:122:        expect(p1.isSuccess()).andReturn(false);
+PromiseAggregatorTest.java:123:        expect(p1.cause()).andReturn(t);
+PromiseAggregatorTest.java:124:        expect(p.setFailure(t)).andReturn(p);
+#NOTICE This @Test verifies the effectivness of the failPending constructor option.
+PromiseAggregatorTest.java:125:        replay(p1, p2, p);
+PromiseAggregatorTest.java:126:
+PromiseAggregatorTest.java:127:        a.add(p1, p2);
+PromiseAggregatorTest.java:128:        a.operationComplete(p1);
+PromiseAggregatorTest.java:129:        verify(p1, p2, p);
+PromiseAggregatorTest.java:130:    }
+PromiseAggregatorTest.java:131:
+PromiseAggregatorTest.java:132:}
+
