@@ -1,0 +1,110 @@
+PromiseCombinerTest as introduced in @45849b2fa86070a4320b0756cf024012f5291b02
+
+===============================================
+Common senses on testing with JUnit and Mockito
+
+#NOTICES
+For each @Test function, the @Before function is called in advance, such that
+each @Test runs independently.
+#NOTICES end
+    @Before
+    public void setup() {
+        MockitoAnnotations.initMocks(this);
+#NOTICES
+As stated in initMocks()'s javadoc, it 'initializes objects annotated with
+Mockito annotations for given testClass'. That's to say, the @Mock members,
+Promise<Void> p1, p2, p3 are initialized here to mock objects.
+
+Each Promise<Void> being mocked to interact with the PromiseCombiner object is
+actually implemented in terms of the Promise<Void> mock object, plus a
+GenericFutureListenerConsumer which will intercept calls to the addListener()
+function of the mock object and emulates the behavior, and a
+GenericFutureListener<Future<Void>> that is used by the
+GenericFutureListenerConsumer to store the listener away for later use.
+
+#NOTICES end
+        combiner = new PromiseCombiner();
+#NOTICES end
+Such is a fundamental rule of thumb that the class being tested shall be left
+as is while all other objects interacting with it shall be created as mocks.
+#NOTICES
+    }
+    @Test
+    public void testNullAggregatePromise() {
+        combiner.finish(p1);
+        verify(p1).trySuccess(any(Void.class));
+    }
+
+    @Test(expected = NullPointerException.class)
+    public void testAddNullPromise() {
+        combiner.add(null);
+    }
+
+============
+Harder parts
+
+    private void mockSuccessPromise(Promise<Void> p, GenericFutureListenerConsumer consumer) {
+#NOTICES
+Here the Promise<Void> mock is built up to be able to finally act as a decent
+successful Promise<Void> by
+1) specifying that the isDone() and isSuccess() functions return true.
+2) mock the addListener() function (see below).
+#NOTICES end
+        when(p.isDone()).thenReturn(true);
+        when(p.isSuccess()).thenReturn(true);
+        mockListener(p, consumer);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mockListener(final Promise<Void> p, final GenericFutureListenerConsumer consumer) {
+        doAnswer(new Answer<Promise<Void>>() {
+            @SuppressWarnings("unchecked")
+            @Override
+            public Promise<Void> answer(InvocationOnMock invocation) throws Throwable {
+                consumer.accept(invocation.getArgumentAt(0, GenericFutureListener.class));
+                return p;
+            }
+        }).when(p).addListener(any(GenericFutureListener.class));
+#NOTICES
+This piece is hard to understand. Basically, it states that when p.addListener()
+is called with any GenericFutureListener, the mock system shall intercept the
+call/invocation, encapsulate into an InvocationOnMock object, from which the
+Answer<Promise<Void>>#answer() function can fetch the mock object whose member
+functions are being called, its arguments, then do everything and return value
+as appopriate.
+
+This must be one of the standard techniques of mocking member functions.
+#NOTICES end
+    }
+
+
+    @Test
+    public void testAddAllSuccess() throws Exception {
+        mockSuccessPromise(p1, l1Consumer);
+#NOTICE See dedicated section.
+        mockSuccessPromise(p2, l2Consumer);
+        combiner.addAll(p1, p2);
+#NOTICES
+When in PromiseCombiner#addAll(), call to promise.addListener(listener) will
+have answer() defined in mockListener called:
+    private GenericFutureListenerConsumer l2Consumer = new GenericFutureListenerConsumer() {
+        @Override
+        public void accept(GenericFutureListener<Future<Void>> listener) {
+            l2 = listener; <- here listener is PromiseCombiner#listener
+        }
+    };
+Because the promise p1 is merely a Promise<Void> mock, call to its member function
+addListener() has to be intercepted, as done in the mockListener() function. Then
+the l2Consumer simply stores the listener away (into l2) for later fulfillment.
+#NOTICES end
+        combiner.finish(p3);
+        l1.operationComplete(p1);
+        verifyNotCompleted(p3);
+        l2.operationComplete(p2);
+#NOTICES
+Here the promise previously added to PromiseCombiner is finally being
+fulfilled by calling the listener's operationComplete() function.
+#NOTICES end
+        verifySuccess(p3);
+    }
+

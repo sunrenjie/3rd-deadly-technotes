@@ -1,0 +1,8 @@
+
+Now that pdftk is missing from fedora, we will resort to its alternative qpdf.
+
+To remove encryption in PDF using qpdf:
+qpdf --decrypt in.pdf out.pdf
+qpdf --show-encryption in.pdf
+qpdf --show-encryption out.pdf
+
