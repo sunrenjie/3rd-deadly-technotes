@@ -5,9 +5,14 @@ import subprocess as sp
 from subprocess import *
 from optparse import OptionParser
 
-# a program that decodes an aax file and split into m4a files by chapter.
+# A program that, given an aax file with its activation bytes, outputs commands
+# that will decode it into m4a files and split into more m4a files by chapters.
 # Stolen from http://stackoverflow.com/questions/30305953/is-there-an-elegant-way-to-split-a-file-by-chapter-using-ffmpeg
+# More info about activation bytes is at:
+# https://github.com/inAudible-NG/audible-activator
 
+
+# The chapter info can be parsed without activation bytes.
 def parseChapters(filename):
     chapters = []
     command = ["ffmpeg", '-i', filename]
@@ -43,8 +48,15 @@ def getChapters():
     infile2 = fbase + fext2
     print("ffmpeg -activation_bytes %s -i %s -vn -c:a copy %s" % (
         options.secret, options.infile, infile2))
+    def get_chapter_num_str(chapter):
+      # '0:20' => 2; the leading '0:' seems always the same and not very useful.
+      assert chapter['name'][0:2] == '0:'
+      return chapter['name'].split(':')[-1]
+    chap_str_len = len(get_chapter_num_str(chapters[-1]))
+    chap_str_format = '%0' + str(chap_str_len) + 'd'
     for chap in chapters:
-        chap['outfile'] = fbase + "-ch-" + re.sub(":", "-", chap['name'])  + fext2
+        n = int(get_chapter_num_str(chap))
+        chap['outfile'] = fbase + "-ch-" + chap_str_format % n  + fext2
         chap['origfile'] = infile2
     return chapters
 
