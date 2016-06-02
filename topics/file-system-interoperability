@@ -14,11 +14,11 @@ except with good reasons. Read support shall be deployed as much as possible
 to help us figure out workaround solutions when there is a need to write to
 file systems without native support.
 
-When is support for some file system native? Its OS vendor invented it,
+What kind of file system support is native? Its OS vendor invented it,
 shipped it in the OS (and hence having tested it extremely heavily behind the
 scene), held relevant patents around it (if there is any).
 
-Here are the detailed Does and Don'ts:
+Here are the detailed support status:
 
 File System    Windows    Linux    Mac OS X
 NTFS           RW         RO [1]   RO
@@ -27,12 +27,13 @@ ext2/3/4       RO [2]     RW       NA [4]
 Apple HPFS     RO [3]     RO [1]   RW
 
 Notes: Reference OS'es are XP/7 for Windows, Fedora 20/21 x86_64 for Linux,
-Mac OS X 10.9. Abbreviations: 'RW' for native read/write support (we forbid
-non-native write anyway), 'RO' for read only, 'NA' for unavailable (even if
-commecial solutions are available). Reading support for all file systems as
-listed are available in Windows, meaning that Windows/NTFS is the ideal
-combination to manipulate/store our data, while Windows/FAT may seems better
-for small-capacity USB thumb drives or SD/TF cards.
+Mac OS X 10.9. Abbreviations: 'RW' for native read/write support (we discourage
+non-native write anyway, despite availability of some commecial solutions),
+'RO' for read only, 'NA' for unavailable. We can easily deduce that reading
+support for all file systems as listed are available in Windows, meaning that
+Windows+NTFS/FAT is the ideal combination to manipulate/store our data. In
+particular, Windows/FAT may seems better for small-capacity USB thumb drives or
+SD/TF cards.
 
 Also:
 [1] Official yet not native write support may trick us to use it and hurt us.
@@ -53,5 +54,29 @@ Also:
   among them.
 
 Once again, always disable write for non-native support. If there is absolute
-necessity, give remote file system (say, NFS) a try.
+necessity, resort to some high-level well-supported portable protocols instead
+of meddling with 'raw' file systems. For example, transmitting over network
+via NFS/SFTP is very usable, though the throughput may be limited.
+
+When smart phones are involved, there are more choices. Apple iOS way of
+transferring files via iTunes is limited by iTunes' availability. On Android,
+one choice is MTP, via an android phone over USB cable. The implementation is
+available on all platforms (with exception of some samsung android phones on
+Mac OS X) with transmission rate close to disk I/O in certain occasions, and
+terribly low in other occasions (for example, very large quantity of small
+files at once on Windows) [1] . On the other hand, 'adb pull/push' is available
+from the platform-tools of Android SDK, again available on all platforms.
+Unlike MTP, the transfer is relatively stable, according to some experiments.
+Maybe that is due to its usage of TCP/IP stack.
+
+More advices:
+1. While samsung android smart phones supports exFAT for its TF card, we
+strongly recommend against doing so: sometimes files on the card created by
+the phone can not be read by MTP, or even when inserting to a card reader
+connected to a computer (though the phone can read it without any problem). For
+one thing, exFAT format is copyrighted by Microsoft; Samsung's implementation
+may be buggy or differs from the standard 'a bit'. On the other hand, exFAT is
+said to be far less reliable than FAT since it has only one file table. Use
+FAT32 as much as possible; for very large TF cards (>32GB), format it with some
+special FAT32 formatter, as Windows cannot do it natively.
 
