@@ -35,14 +35,16 @@ Additional info:
    necessity of compiling as i386.
 
 [20150516]
+[Updated on 20160603 after testing on Mac OS X 10.10.5]
 Compiling experiences of bochs 2.6.8 on mac os x convinces us to update to
-this version (compiling on Linux systems has always been trivial). Here are
+this version (compiling on Linux systems has always been easy). Here are
 the commands:
 ./configure --enable-cdrom --enable-disasm --enable-readline --with-sdl2 \
-  --prefix=/Users/renjiesun/bin/bochs-2.6.8 --enable-gdb-stub
+  --without-carbon --prefix=/Users/renjiesun/bin/bochs-2.6.8 --enable-gdb-stub
 ./configure --enable-cdrom --enable-disasm --enable-readline --with-sdl2 \
-  --prefix=/Users/renjiesun/bin/bochs-dbg-2.6.8 --enable-debugger
+  --without-carbon --prefix=/Users/renjiesun/bin/bochs-dbg-2.6.8
+  --enable-debugger
 
-Prerequisite: install libsdl2 and readline via Macports.
-Also, on Linux, readline-dev/readline-devel package is required.
+Prerequisite: install these packages via Macports:
+sudo port install libsdl2 gtk2 pkgconfig readline
 
