@@ -78,5 +78,67 @@ one thing, exFAT format is copyrighted by Microsoft; Samsung's implementation
 may be buggy or differs from the standard 'a bit'. On the other hand, exFAT is
 said to be far less reliable than FAT since it has only one file table. Use
 FAT32 as much as possible; for very large TF cards (>32GB), format it with some
-special FAT32 formatter, as Windows cannot do it natively.
+special-purpose Windows FAT32 formatter, as Windows itself cannot do it
+natively.
+
+===================================================
+Using rsync to transfer files among all major OS'es
+
+The stack ssh+rsync is found to be universally available, truely portable and
+usable in ALL major operating systems we use, without taking care of the
+underlying file system implementations.
+
+One benefit of this stack is that the underlying TCP/IP is universally
+available. Desktop operating systems may use LAN or wifi, while the mobile ones
+can create ad-hoc wifi hotspot trivially, on which ssh+rsync can transfer data
+at speed as high as 6-7MB/s.
+
+Availability of softwares (rsync, ssh/d):
+Windows: The cwRsync distribution (https://www.itefix.net/cwrsync) contains
+rsync and ssh; ssh/d is available from mintty and cygwin.
+Linux: all are available from the officla package management system.
+Mac OS X: all come with the OS.
+Android: all can be installed from the termux app.
+iOS: all can be installed from cydia.
+
+Installation Notes:
+0) Each mobile device shall install sshd. The reason is that it is difficult to
+type commands directly there; they have be used as ssh server.
+1) Each device shall install the rsync program; there is no distinction between
+clients and servers.
+
+Usages:
+
+First of all, rsync is mainly useful when the transfer of data involve
+difference calculation. For plain copying, other technologies may be faster
+and or easier (for example, MTP-over-Android, ShareIt, or simply scp).
+
+rsync --size-only -rv -n --delete --progress \
+  -e 'ssh -i ./termux-id_rsa -p 8022' \
+  192.168.43.1:/storage/extSdCard/a/t.hotspot/ t.hotspot/
+
+Note the specification of the folder names with terminal slash in the source
+and destination paths.
+
+Options:
+-a: don't use it, it implies much stuff: -rlptgoD (preserve links, permissions,
+  modification times, ownerships, device/special files, to name a few);
+  instead, we typically need -r (and -t sometimes).
+--progress: to display a progress bar to charm the user
+--delete: to delete extra files
+-e: specify ssh command, this is where we could specify ssh port and identity
+  key to login
+-n: dry run
+--checksum: to verify files based on file checksum; may be very expensive to
+  run when a mobile OS is involved.
+--size-only: to verify files based on size only; can be useful, for example,
+  in sync'ing lite, in which files of the same name rarely differ.
+
+Known Limitation:
+android: cannot login with password; has to authenticate via key files;
+  non-ASCII chars can't be displayed properly within ssh terminal (probably the
+  limitation of the terminal and/or ssh implementation of termux, since the adb
+  shell can display them properly).
+mac->android: Non-ASCII chars not be displayed properly in rsync listing,
+  though the transferred files are given names properly.
 
