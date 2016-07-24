@@ -1,0 +1,27 @@
+
+Artifactory related stuff
+
+Now that artifactory is our dominant maven server, we shall maintain knowledge
+around it.
+
+=================================
+Updating, copying, and relocating
+
+Artifactory can be portable with trivial efforts and a bit of care.
+
+Always follow the official reference:
+https://www.jfrog.com/confluence/display/RTF/Upgrading+Artifactory
+
+More notes:
+0. Export data from web page has always being a good idea. The system part is
+  small in size, yet the repository part can be huge as it contains all cached
+  files. It is safe to skip the repository part and re-download the stuff from
+  scratch.
+1. The daily/weekly backups can be disabled and the backups sub-folder simply
+  removed to save disk storage and labor.
+2. When copying from one place/OS to another, open etc/storage.properties and
+  change database url if necessary. It has to be absolute.
+3. May need to set JAVA_HOME if necessary.
+4. It seems difficult to back up the data sub-folder directly; use the export/
+  import functionalities provided by the web interface instead.
+
