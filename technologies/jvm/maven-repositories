@@ -12,4 +12,6 @@ https://oss.sonatype.org/content/repositories/releases/
 http://repo.scala-sbt.org/scalasbt/sbt-plugin-releases/
 http://repo.typesafe.com/typesafe/ivy-releases
 http://jcenter.bintray.com
+http://repo.spring.io/plugins-release/
+http://repo.spring.io/libs-release/
 
