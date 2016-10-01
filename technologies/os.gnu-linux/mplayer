@@ -4,3 +4,7 @@ Option to play left channel (channel 0)  in both speakers:
 To play right channel (channel 1) in both speakers:
 -af channels=2:2:1:0:1:1
 
+Use '-ac' and '-vc' to use audio and video codec. For example, to play a file
+named dvdrip.xvid.dts.3cd-waf_01.avi, we may use this command:
+mplayer -ac dts *.avi
+
