@@ -3,6 +3,43 @@ Install Fedora GNU/Linux of our own taste
 We keep installation and configuration info here to make further repeats
 easier (targeting Fedora 23 by default unless otherwise mentioned explicitly).
 
+
+===========================
+Installation of Fedora 23 from hard disk/USB drive
+
+Steps:
+0) Download the server iso file, put it on some ext/fat partition accessible
+by the installer.
+
+The installer seems to have weaker and weaker ability to recognize complex
+partitions for installation targets, as version bumps. To avoid trouble, it
+is better we put the installation ISO file on a disk that has very simple
+partitioning scheme and contains no installation target partition. An USB
+FAT32 thumb drive will be ideal.
+
+1) Extract isolinux folder from the iso, put it somewhere accessible from
+grub.
+
+We typically use windows+grldr for bootstrapping the installation. In such
+case, we might put it on any NTFS/FAT/EXT partition.
+
+2) Boot computer with grub. load kernel/initrd from the isolinux folder. In
+particular, the kernel command line shall be like:
+kernel /path/to/vmlinuz repo=hd:/dev/sdb1:/
+
+For the above example, we put the iso file on root folder of a partition
+accessible from the installer with (linux, not grub) device name /dev/sdb1.
+
+3) Finally type 'boot' command to start installation. If everything is fine,
+the GUI installer will start afterwards.
+
+If the installer does not recognize target drive despite such effort, an
+alternative way will be to attach the target drive (as USB drive, for
+example) to another computer with better compatibility to perform the
+installation. When installer finishes and prompts to reboot the system,
+shutdown the computer, connect the target drive back to its original host,
+then boot the newly installed partition.
+
 =====================
 YUM Software packages
 
