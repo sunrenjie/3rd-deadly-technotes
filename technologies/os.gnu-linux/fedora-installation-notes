@@ -3,8 +3,7 @@ Install Fedora GNU/Linux of our own taste
 We keep installation and configuration info here to make further repeats
 easier (targeting Fedora 23 by default unless otherwise mentioned explicitly).
 
-
-===========================
+==================================================
 Installation of Fedora 23 from hard disk/USB drive
 
 Steps:
@@ -58,45 +57,74 @@ yum install mariadb-server libreoffice telnet p7zip p7zip-plugins wget lsb \
 # ia32 support (wine, vmware-view, etc)
 yum install gtk2.i686 gtk3.i686 libpng12.i686 alsa-lib.i686 gdk-pixbuf2.i686 \
   libxkbfile.i686 glibc.i686 cairo.i686 freetype-freeworld \
-  gtk-murrine-engine.i686
+  freetype-freeworld.i686 gtk-murrine-engine.i686
 
 # for installing python packages
-yum install gcc redhat-rpm-config mariadb-devel libxml2 libxslt libxml2-devel \
-  libxslt-devel python3-devel python-devel python-virtualenv
+yum install gcc-c++ redhat-rpm-config libxml2 libxslt libxml2-devel \
+  libyaml-devel libxslt-devel python3-devel python-devel python-virtualenv
 
 # for exfat support
 yum install fuse-exfat exfat-utils
 
+# input method; originally we use ibus-pinyin, but it is buggy.
+yum install fcitx-pinyin fcitx-configtool
+
 Special notes:
 1. MPlayer and freetype-freeworld, exfat support are from rpmfusion.
 2. alsa-plugins-pulseaudio is required for mplayer to play MP3 files normally.
+3. The package system has the special feature that upon a successful
+installation RPM download cache is cleared, no matter whether they are
+installed or not. When installing a large number of packages and conflicts
+come up after downloading, we would merrily solve the conflicts. If that
+conflict resolution process involves successful installation of some packages
+(it shall typically do!), the cache will be cleared. After that, when we
+we re-run the installation, we will have to enjoy downloading the RPM files
+again!
+4. The classical Linux bug of vim-minimal conflict persists.
+5. Also remains the group install bug of erroneously believing a group of rpm
+packages is installed while actually it isn't. In which case, examine the list
+of packages within the group, construct a command to install them all.
+6. Now mirrors.aliyun.com is much usable than mirrors.ustc.edu.cn.
 
 ==============
 Other software
 
 + AMD graphic driver
-  + The latest official driver as of this write supports kernel up to 3.19.
-    But Fedora 23 has 4.2.6. This means we will have to resort to the driver
-    bundled with Fedora (xorg-x11-drv-ati), which just works. If there is
-    anything wrong, check the Xorg log. In one occation, some fallback driver
-    leads to display problem; uninstalled it and the problem disappeared.
-
-+ Oracle JDK
+  + Follow the instructions at the page:
+    https://bluehatrecord.wordpress.com/2016/03/25/installing-the-proprietary-amd-crimson-driver-on-fedora-23-with-linux-kernel-4-4-6-300/
++ JDK
+  + Avoid OpenJDK, always use Oracle JDK as much as possible. One prominent
+    difference is font-rendering of Jetbrains Intellij Idea.
 + Firefox
-  + Bookmark Sync'ing
-  + Plugins (@ ~/.mozilla/plugins):
+  + Change the UI font: cd to the profile dir, create sub-folder chrome,
+    create a userChrome.css file there with the content:
+    * { font-family: "Ubuntu" !important; }
+  + Bookmark Sync'ing: just login and done.
+  + Plugins:
     + Flash: downloaded from Adobe site; cp libflashplayer.so =>
-    + Java: ln -s jdk/jre/lib/amd64/libnpjp2.so =>
+      ~/.mozilla/plugins
   + Add-ons (can be sync'ed together with bookmarks):
+    + 'Abduction!-FIXED' and 'Easy Screenshot': these two plugins allow to
+      save the whole or partial part of the web page to image. We are yet to
+      figure out which is better.
     + 'EPUBReader'
     + 'FoxyProxy Standard',
     + 'Theme Font & Size Changer'
     + 'User Agent Switcher'
 + Google Chrome (extensions in the official store cannot be downloaded for
   offline use; has to be downloaded from sources elsewhere)
+  + Plugins
+    + Flash: as of version google-chrome-stable-54.0.2840.100-1.x86_64, we
+      have to download flash plugin separately from Adobe site. Extract the
+      .tar.gz file, copy libpepflashplayer.so and manifest.json to some
+      folder (for convenience, we use chrome's installation directory;
+      /opt/google/chrome/), then modify the start-up script google-chrome (in
+      installation dir) to add option to the 'chrome' binary to point to the
+      flash program:
+      '--ppapi-flash-path=/opt/google/chrome/libpepflashplayer.so' [3].
   + Extensions:
     + Ultimate User Agent Switcher, URL Sniffer
-    + youkuhtml5player (http://zythum.sinaapp.com/youkuhtml5playerbookmark/)
+    + ...
 + Wine (specific version required for certain app) and .wine dir [1]
 + VMware View Client [2]
 + Fonts
@@ -106,23 +134,36 @@ Other software
     Oracle JDK and therefore has to maintain our own Java softwares.
 + Software available directly from git repos (notes, bypy, etc).
 
-[1] See dedicated file on such topics.
+[1][2] See dedicated file on such topics.
+[3] Reference: https://googlechromereleases.blogspot.com/2016/10/stable-channel-update-for-desktop.html
+search keyword flash in this page; the method is described in a comment.
 
 ==============
 Configurations
 
 vi /etc/selinux/config => disabled
-cp .bash_profile .bashrc .gitconfig .gitignore .vimrc .my.cnf .ssh/config \
+
+Transfer of config files from old system to a new one:
+cp .bash_profile .bashrc .gitconfig .gitignore .vimrc .my.cnf \
   .config/fontconfig/fonts.conf .m2/settings.xml .sbt/repositories \
   .sbt/0.13/plugins/build.sbt .gradle/gradle.properties \
-  .gradle/init.d/artifactory.gradle .PyCharm50/config .IntelliJIdea15/config
-  + Use this transfer technique to avoid the headache of directory hierarchies:
+  .gradle/init.d/artifactory.gradle
+  + Use this transfer technique to make things easier (folder hierarchy
+    respected, symlinks kept not dereferenced, time stamps left untouched):
     + cd /mnt1/home/r/  # old home dir
     + tar -cf - xxx yyy | tar -xf - -C /home/r/ # to new home dir
 cp /etc/ssh/sshd_config # multiple port, UseDNS no, etc.
 
 # To boot into GUI login (remove destination file if it already exists)
 ln -sf /usr/lib/systemd/system/graphical.target /etc/systemd/system/default.target
+
+Start-up applications:
+The start-up application feature allows us to run GUI related start-up programs.
+Currently we have:
++ fcitx (has to export variables in .bash_profile in advance)
++ touch screen and monitor assignment (Toshiba P50b):
+  xinput --map-to-output $(xinput --list | grep 'ELAN Touchscreen' | \
+    grep -o 'id=[0-9]*' | awk -F '=' '{print $2}') eDP1
 
 ===============
 Additional Info
