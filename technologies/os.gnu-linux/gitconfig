@@ -1,0 +1,30 @@
+[user]
+	email =
+	name =
+
+[core]
+	editor = vim
+	excludesfile = ~/.gitignore
+	# Possible values:
+	# 'false': don't mess with line endings
+	# 'true': ensure LF in repo and CRLF in (Windows) file system
+	# 'input': eliminate CRLF; check out as-is, commit as LF
+	autocrlf = input
+
+[color]
+	ui = auto
+
+[push]
+	default = simple
+
+[credential]
+	# For remembering password.
+	# Platform irrelevant: 'cache --timeout=36000' for remembering the
+	# password in memory for 36000 seconds, or 10h (default to 900 seconds,
+	# if the '--timeput' option is not specified).
+	# Platform specific values:
+	# Windows: 'wincred'
+	# Mac OS X: 'osxkeychain'
+	# Linux: NA
+	helper = cache --timeout=36000
+
