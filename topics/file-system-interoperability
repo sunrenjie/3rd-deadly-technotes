@@ -96,10 +96,10 @@ at speed as high as 6-7MB/s.
 Availability of softwares (rsync, ssh/d):
 Windows: The cwRsync distribution (https://www.itefix.net/cwrsync) contains
 rsync and ssh; ssh/d is available from mintty and cygwin.
-Linux: all are available from the officla package management system.
-Mac OS X: all come with the OS.
-Android: all can be installed from the termux app.
-iOS: all can be installed from cydia.
+Linux: preinstalled or available from the official package management system.
+Mac OS X: preinstalled with the OS.
+Android: can be installed from the termux app.
+iOS: can be installed from cydia.
 
 Installation Notes:
 0) Each mobile device shall install sshd. The reason is that it is difficult to
@@ -114,11 +114,13 @@ difference calculation. For plain copying, other technologies may be faster
 and or easier (for example, MTP-over-Android, ShareIt, or simply scp).
 
 rsync --size-only -rv -n --delete --progress \
-  -e 'ssh -i ./termux-id_rsa -p 8022' \
+  -e 'ssh -i termux-id_rsa -p 8022' \
   192.168.43.1:/storage/extSdCard/a/t.hotspot/ t.hotspot/
 
 Note the specification of the folder names with terminal slash in the source
-and destination paths.
+and destination paths. Also, ssh login is performed with an identity file
+that the server has previously authorized, such that no password will be
+required.
 
 Options:
 -a: don't use it, it implies much stuff: -rlptgoD (preserve links, permissions,
@@ -141,4 +143,39 @@ android: cannot login with password; has to authenticate via key files;
   shell can display them properly).
 mac->android: Non-ASCII chars not be displayed properly in rsync listing,
   though the transferred files are given names properly.
+windows client:
+  0) rsync is essentially a cygwin app; all paths shall be in cygwin style.
+  1) the ssh identity file may need to be changed to be only accessible by the
+     current user (via Windows Properties menu, and then Security tab);
+     otherwise ssh may complain of inadequate permission.
+  1) when writing files into Windows NTFS partition, rsync may create files/
+  folders with incorrect ownership and/or permissions (or maybe it's simply
+  because we don't specify the correct options); we may need to run takeown
+  (to take over ownership) and/or cacls (to grant ourself full permission)
+  over the root folder several times.
+
+=====================================================
+Use robocopy to sync files between Windows partitions
+
+Robocopy (robust copy) is a Windows-only tool that allow file sync'ing,
+difference computation in many ways, etc. Here only list a few useful
+commands:
+
+If time stamps are really the only difference, sync them first:
+(this avoids unnecessary copying)
+robocopy a.videos G:\t\a.videos /mir /fp /copy:at /l
+
+list before normal copy:
+robocopy a.videos.comp G:\t\a.videos.comp /mir /fp /l
+
+listing before normal copy (without the dirs):
+robocopy a.videos.comp G:\t\a.videos.comp /mir /fp /ndl /l
+
+if a lot of Newer/Older files are listed, then the time stamps are mistaken
+somehow; reset it:
+robocopy lite T:\t\lite /mir /fp /ndl /copy:t /l
+
+Note that while rsync commands always specify terminal slash '/' for both
+source and destination folders, robocopy commands listed above always strip
+the '/'. Respect the conventions, life will be better.
 
