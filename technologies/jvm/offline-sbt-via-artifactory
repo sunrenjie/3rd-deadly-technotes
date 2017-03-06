@@ -43,6 +43,8 @@ installation directory:
   the file bin/artifactory.sh; for example: 'export JAVA_HOME=~/bin/jdk1.8'.
 + Certain configurations uses absolute paths. The only one spotted thus far is
   the 'url' option in etc/storage.properties.
++ Under artifactory/tomcat directory, there may be a absolute symlink, change
+  it to a relative one or simply correct it.
 
 Ref:
 http://www.scala-sbt.org/0.13/docs/Proxy-Repositories.html
