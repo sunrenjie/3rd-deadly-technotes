@@ -1,0 +1,3 @@
+# To fetch a github PR '6781' and create a local branch 'pr-6781' for it
+git fetch origin pull/6781/head:pr-6781
+
