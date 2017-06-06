@@ -6,3 +6,6 @@ qpdf --decrypt in.pdf out.pdf
 qpdf --show-encryption in.pdf
 qpdf --show-encryption out.pdf
 
+To concatenate several PDF files into one :
+qpdf --empty --pages *.pdf -- ../out.pdf
+
