@@ -46,7 +46,7 @@ NOTES:
 4. Currently, the combination of setup files that tests to work is: isolinux
    from Server 21 disc with the iso image from Gnome Live 21 disc (image name:
    'Fedora-Live-Workstation-x86_64-21-5.iso'). Chances are that other
-   combinations may work.
+   combinations may work. Fedora 22 also tested OK.
 
 ================================================================================
 HOWTO: Installing "Fedora 20" to PC with grub2:
