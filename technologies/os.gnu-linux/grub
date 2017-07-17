@@ -22,31 +22,39 @@ GRUB and GRUB2 related info @ 20141217
      boot
 
 ================================================================================
-HOWTO: Installing "Fedora 20" to PC with grldr:
+HOWTO: Installing Fedora LiveCD Workstation [1] to PC with grldr:
 
-1. Fetch the installation disc iso image file, place it in a fat/ext file
-   system [1] [4].
-2. From the iso file, extract isolinux dir and place vmlinuz* and initrd* to
-   somewhere that can be find by grldr [4].
+1. Fetch the LiveCD Workstation installation disc iso image file, place it in
+   a fat/ext file system. [2][6]
+2. Locate the isolinux folder from the Server installation disc (of the same
+   version as the LiveCD disc), copy out vmlinuz* and initrd* to somewhere that
+   can be referenced by grldr. [3]
 3. At grldr command line prompt, enter:
-   kernel (hdx,y)/path/to/vmlinuz repo=hd:/dev/sda5:/ [2]
+   kernel (hdx,y)/path/to/vmlinuz repo=hd:/dev/sda5:/ [4][5]
    initrd (hdx,y)/path/to/initrd
    boot
+4. After initial configuration, we may finally be able to land on the livecd
+   system. Run 'liveinst' command as root to install the livecd system on to
+   hard disk. [5]
 
 NOTES:
-1. Supported file system for placing of the iso image file is msdos fat, linux
+1. Tested OK on Fedora 20, 22, 23, 26. LiveCD with Mate Desktop booted using
+   this HOWTO will prompt for password we could never manage to guess. Server
+   edition may work, but no test is performed yet.
+2. Supported file system for placing of the iso image file is msdos fat, linux
    ext. This indicates that if the iso file is larger than 4GB, the only choice
    will be linux ext. Mysteriously, the NTFS driver is included in the initrd,
    yet placing iso file on NTFS is not supported.
-2. Other options may be needed based on trial-and-error tests. For example, on
+3. This means the vmlinuz and initrd files can be placed on an NTFS partition.
+4. The device name can be obtained when running the LiveCD Fedora, or otherwise
+   has to be guessed.
+5. Other options may be needed based on trial-and-error tests. For example, on
    HP Proliant DL380G6, 'modprobe.blacklist=cnic,bnx2i' is required.
-3. Support of this method for installation on Fedora 21 is partial and yet to
-   be thoroughly tested. Apparently, the support for 'repo' is the result of
-   right vmlinuz/initrd and iso image file.
-4. Currently, the combination of setup files that tests to work is: isolinux
-   from Server 21 disc with the iso image from Gnome Live 21 disc (image name:
-   'Fedora-Live-Workstation-x86_64-21-5.iso'). Chances are that other
-   combinations may work. Fedora 22 also tested OK.
+6. During installation to hard disk, avoid touching or mouting any of the
+   partitions on the device where the ISO installation file is at. Put it the
+   other way, don't place the ISO installation file on any device that you may
+   touch or mount. Otherwise the installer may complain of being unable to
+   umount some devices.
 
 ================================================================================
 HOWTO: Installing "Fedora 20" to PC with grub2:

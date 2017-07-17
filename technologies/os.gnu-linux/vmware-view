@@ -51,3 +51,7 @@ References:
    64-bit package must have been installed along with the desktop). On
    Fedora, it may be something like gtk-murrine-engine.i686, while on Ubuntu
    its name will resemble gtk2-engines-murrine:i386 .
+
+Update 20170717:
+The client version 2.2.0 does not work on Fedora 26. Fortunately, VMWare
+released a newer version 4.5.0 that works.
