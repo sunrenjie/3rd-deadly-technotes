@@ -108,17 +108,30 @@ partition table and hence device names changed).
 1. Boot LiveCD (see instructions above); mount the root filesystem (say /mnt).
 2. Validate entries in /etc/fstab, especially UUIDs.
 3. Re-install grub onto the MBR of the disk:
-   grub-install --root-directory=/mnt /dev/sdX
+   grub-install --root-directory=/mnt /dev/sdX [1] [2]
    (where /dev/sdX is the device path of the disk)
 4. Re-generate the configuration file /boot/gru2/grub.cfg for the target file
    system from /etc/default/grub; run it only if necessary:
    grub2-mkconfig -o /mnt/boot/grub2/grub.cfg
 
+[1] On Fedora 26, the command turns out to be grub2-install.
+[2] If we have managed to boot the OS we intend to fix, the command will
+    become "grub-install --root-directory=/ /dev/sdX".
+
 =================
 /etc/default/grub
 
 It holds default values used for (re-)generating grub2 configuration file
-/boot/grub2/grub.cfg. Some kernel parameters can be set this way. Prominant
-values are:
+/boot/grub2/grub.cfg. Some kernel parameters can be set this way.
 
-video=1920x1080  # Override framebuffer video defaults; vconsole resolution
+===========================
+Prominant kernel parameters
+
+They are specified at the kernel (grub1) or linux (grub2) command line:
+1. video=1920x1080  # Override framebuffer video defaults; vconsole resolution
+2. repo=hd:/dev/sdb7:/f26  # specify Fedora installation disc ISO file path
+3. modprobe.blacklist=radeon  # requires to ban the kernel module(s)
+4. radeon.runpm=0  # set module attribute
+5. quite  # being less verbose
+6. single  # drop to single user mode
+
