@@ -135,3 +135,18 @@ They are specified at the kernel (grub1) or linux (grub2) command line:
 5. quite  # being less verbose
 6. single  # drop to single user mode
 
+==============
+About grub4dos
+
+We've been using grub4dos 0.4.4-20090331. But this version hits a problem while
+loading kernel files from ext4 partitions. These ext4 partitions are created by
+Fedora 26. While trying to load kernel files from there, grldr complains of
+"Filesystem compatibility error, cannot read whole file". One ext4 partition
+created by Fedora 23 does have such problem. We suspect that there is some
+fundamental change between the two versions, but have not verified it.
+
+Solution: Fortunately, some one else is still actively working on grub4dos at
+http://grub4dos.chenall.net/. While trying grldr+grldr.mbr files from
+grub4dos-0.4.6a-2017-06-25.7z (the latest version from the site as of now), the
+problem is gone and all is fine.
+
