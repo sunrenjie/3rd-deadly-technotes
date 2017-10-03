@@ -7,6 +7,10 @@ App support
 
 [OED on CDROM v1.14]
 
+Update 20171003: the wine version of wine-1.9.12-1.fc23.x86_64 from Fedora 23
+is tested to work with even the problems described below fixed. Now no more
+need for manual compilation.
+
 According to experiments, Wine 1.6.2 is tested to support OED 1.14 to the point
 that majority contents are displayed fine, except:
 1. Pop-up menus after click on the menu bar are not adjacent to menu bar.
@@ -15,6 +19,15 @@ that majority contents are displayed fine, except:
 
 Other versions that do not work is 1.5.31 and 1.7.5: the winevdm.exe process
 simply crashes.
+
+[Counter-Strike]
+
+Notes:
+1. needs to configure wine to 'emulate a virtual desktop' by a size say,
+1024x768.
+2. As dependency, installing wine may install graphics driver files that may
+override fglrx so files (actually symlinks). Needs to restore them. The
+command may help: sudo ldconfig -p | grep -i gl.so
 
 ============
 Installation
