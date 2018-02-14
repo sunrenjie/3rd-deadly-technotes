@@ -99,6 +99,20 @@ boot
 Note the difference in the chainloader command and the IMG-only rootnoverify
 command.
 
+====================================
+HOWTO: boot from grub2 rescue prompt
+
+We may drop to grub2 rescue prompt if the root device name is changed because
+of some partition table change(s). Steps to go:
+1. ls # to determine the new root device name, e.g. (hd0,msdos2)
+2. set root=(hd0,msdos2)
+3. set prefix=(hd0,msdos2)/boot/grub2  # the grub2 directory, verified by 'ls'
+4. insmod normal
+5. normal
+
+And if there is no damage to the grub files in file system, we will now be in
+grub menu. Boot the Linux and go on to fix grub2 installation.
+
 ===============================================================================
 HOWTO: fix grub2 (on partition table changes, etc.):
 
@@ -108,21 +122,22 @@ partition table and hence device names changed).
 1. Boot LiveCD (see instructions above); mount the root filesystem (say /mnt).
 2. Validate entries in /etc/fstab, especially UUIDs.
 3. Re-install grub onto the MBR of the disk:
-   grub-install --root-directory=/mnt /dev/sdX [1] [2]
+   grub2-install --root-directory=/mnt /dev/sdX [1] [2]
    (where /dev/sdX is the device path of the disk)
-4. Re-generate the configuration file /boot/gru2/grub.cfg for the target file
+4. Re-generate the configuration file /boot/grub2/grub.cfg for the target file
    system from /etc/default/grub; run it only if necessary:
-   grub2-mkconfig -o /mnt/boot/grub2/grub.cfg
+   grub2-mkconfig -o /mnt/boot/grub2/grub.cfg [3]
 
-[1] On Fedora 26, the command turns out to be grub2-install.
+[1][3] On older systems, the commands may be grub-install and grub-mkconfig.
 [2] If we have managed to boot the OS we intend to fix, the command will
-    become "grub-install --root-directory=/ /dev/sdX".
+    become "grub2-install --root-directory=/ /dev/sdX".
 
 =================
 /etc/default/grub
 
 It holds default values used for (re-)generating grub2 configuration file
-/boot/grub2/grub.cfg. Some kernel parameters can be set this way.
+/boot/grub2/grub.cfg. Some kernel parameters can be set in this file within the
+GRUB_CMDLINE_LINUX option.
 
 ===========================
 Prominant kernel parameters
@@ -143,7 +158,8 @@ loading kernel files from ext4 partitions. These ext4 partitions are created by
 Fedora 26. While trying to load kernel files from there, grldr complains of
 "Filesystem compatibility error, cannot read whole file". One ext4 partition
 created by Fedora 23 does have such problem. We suspect that there is some
-fundamental change between the two versions, but have not verified it.
+fundamental change between the two versions, but have not verified it (seems
+that ext4 64-bit is to blame; the feature itself can be disabled somehow).
 
 Solution: Fortunately, some one else is still actively working on grub4dos at
 http://grub4dos.chenall.net/. While trying grldr+grldr.mbr files from
