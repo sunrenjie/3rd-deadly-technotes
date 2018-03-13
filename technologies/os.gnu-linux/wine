@@ -7,18 +7,19 @@ App support
 
 [OED on CDROM v1.14]
 
-Update 20171003: the wine version of wine-1.9.12-1.fc23.x86_64 from Fedora 23
-is tested to work with even the problems described below fixed. Now no more
-need for manual compilation.
-
 According to experiments, Wine 1.6.2 is tested to support OED 1.14 to the point
 that majority contents are displayed fine, except:
 1. Pop-up menus after click on the menu bar are not adjacent to menu bar.
 2. Characters that should be displayed in font 'Porson Greek One' (as in
    Windows) is not rendered correctly; instead, font like 'Symbol' is used.
 
-Other versions that do not work is 1.5.31 and 1.7.5: the winevdm.exe process
-simply crashes.
+Update 20171003: the wine version of wine-1.9.12-1.fc23.x86_64 from Fedora 23
+is tested to work with even the problems described below fixed. Now no more
+need for manual compilation.
+
+Updated 20180313: Wine 2.20.0-staging is also good enough.
+It is available as binary repo distributions to Fedora 26 and Ubuntu 16.04 (and
+possibly other versions). So we don't need to compile it.
 
 [Counter-Strike]
 

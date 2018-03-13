@@ -149,6 +149,13 @@ They are specified at the kernel (grub1) or linux (grub2) command line:
 4. radeon.runpm=0  # set module attribute
 5. quite  # being less verbose
 6. single  # drop to single user mode
+7. rd.live.overlay.size  # Fedora LiveCD: the root ram disk size [1]
+
+[1] On Fedora 27 LiveCD, the default value is 32768, corresponding to 0.5GB ram
+disk. In a system with 16GB memory, we've managed to set the value to 327680
+and get a root disk with roughly 6GB (not precisely 5GB) in total and 2GB free.
+This allows to download and install plenty of packages for testing.
+Reference: https://fedoraproject.org/wiki/LiveOS_image#Storage
 
 ==============
 About grub4dos
