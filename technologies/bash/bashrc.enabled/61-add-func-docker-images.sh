@@ -1,0 +1,1 @@
+../bashrc.available/61-add-func-docker-images.sh
