@@ -113,6 +113,23 @@ of some partition table change(s). Steps to go:
 And if there is no damage to the grub files in file system, we will now be in
 grub menu. Boot the Linux and go on to fix grub2 installation.
 
+Booting ntldr from an NTFS partition is also possible:
+1. ls # to determine the new root device name, e.g. (hd0,msdos2)
+2. set root=(hd0,msdos2)  # the root device where grub is installed
+3. set prefix=(hd0,msdos2)/boot/grub2  # the grub2 directory, verified by 'ls'
+4. insmod ntfs
+5. insmod ntldr
+6. set root=(hd0,msdos1)  # now root the NTFS partition
+7. ntldr /ntldr
+8. boot
+
+The general idea is to try to find grub installation folder and then insmod the
+modules to make the grub rescue prompt more powerful. Try different methods if
+unfortunately the grub rescue prompt version does not match that of the grub
+in-file-system installation and there are insmod errors. For example, grub
+rescue prompt from CentOS 7.5 cannot insmod normal.mod from grub installation
+from Fedora 28, but can insmod ntfs, ntldr, and many others.
+
 ===============================================================================
 HOWTO: fix grub2 (on partition table changes, etc.):
 
