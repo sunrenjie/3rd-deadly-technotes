@@ -27,8 +27,10 @@ alias ll='/bin/ls -l --color'
 alias lh='/bin/ls -lh --color'
 alias la='/bin/ls -la --color'
 
-if [ -f /usr/bin/caja ]; then
-  alias open='/usr/bin/caja'
+if echo $XDG_MENU_PREFIX | grep -q gnome; then
+  alias open='nautilus'
+elif [ "_$XDG_SESSION_DESKTOP" = "_mate" ]; then
+  alias open='caja'
 fi
 
 alias virsh='sudo virsh'
