@@ -1,0 +1,114 @@
+<?xml version='1.0'?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+    <!-- Default fonts for the generic families -->
+    <alias>
+        <family>serif</family>
+        <prefer>
+            <family>Georgia</family>
+            <family>STSong</family>
+        </prefer>
+    </alias>
+    <alias>
+        <family>sans-serif</family>
+        <prefer>
+            <family>Dejavu Sans Condensed</family>
+            <family>STHeiti</family>
+        </prefer>
+    </alias>
+    <alias>
+        <family>monospace</family>
+        <prefer>
+            <family>Ubuntu Mono</family>
+            <family>STSong</family>
+        </prefer>
+    </alias>
+
+    <!-- Lucida Console is ugly. -->
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>Lucida Console</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>Ubuntu Mono</string>
+        </edit>
+    </match>
+
+    <!-- Replace all Microsoft CJK fonts, which are generally ugly. -->
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>Microsoft YaHei</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>STHeiti</string>
+        </edit>
+    </match>
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>微软雅黑</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>STHeiti</string>
+        </edit>
+    </match>
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>宋体</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>STSong</string>
+        </edit>
+    </match>
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>SimSun</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>STSong</string>
+        </edit>
+    </match>
+    <!-- Songti SC from mac is not rendered correctly in Linux. -->
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>Songti SC</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>STSong</string>
+        </edit>
+    </match>
+
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>Arial</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>Georgia</string>
+        </edit>
+    </match>
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>Helvetica</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>Lucida Grande</string>
+        </edit>
+    </match>
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>Segoe UI</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>Lucida Grande</string>
+        </edit>
+    </match>
+    <match target="pattern">
+        <test name="family" qual="any">
+            <string>Helvetica Neue</string>
+        </test>
+        <edit binding="same" mode="assign" name="family">
+            <string>Lucida Grande</string>
+        </edit>
+    </match>
+    <dir>~/.fonts</dir>
+</fontconfig>
+
