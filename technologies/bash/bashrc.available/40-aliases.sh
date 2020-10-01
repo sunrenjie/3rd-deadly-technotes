@@ -39,3 +39,20 @@ fi
 
 alias git_checkout_all='git status | awk '"'"'$1=="modified:"{print $2}'"'"' | xargs echo git checkout --'
 
+timer() {
+  if [ "_$1" == "_" ]; then
+    echo shall supply the seconds to wait.
+    return
+  fi
+  m=$(( $1 / 60))
+  s=$(( $1 - 60 * m))
+  echo "$(date '+%Y-%m-%d %a %H%M %Ss'): will wait up to $m minutes, $s seconds ..."
+  for ((i=$1; i>=1; i--)); do
+    m=$(( i / 60))
+    s=$((i - 60 * m))
+    echo -ne "$(date '+%Y-%m-%d %a %H%M %Ss'): remaining $m minutes, $s seconds ...\033[0K\r"
+    sleep 1
+  done
+  echo "$(date '+%Y-%m-%d %a %H%M %Ss'): done."
+}
+
